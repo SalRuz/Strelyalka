@@ -15,11 +15,12 @@
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
+            overflow: hidden;
         }
         
         .container {
             text-align: center;
-            max-width: 800px;
+            max-width: 1000px;
             background: rgba(0, 0, 0, 0.7);
             padding: 20px;
             border-radius: 15px;
@@ -35,13 +36,15 @@
         .game-container {
             position: relative;
             margin: 20px auto;
+            overflow: hidden;
+            border: 3px solid #333;
+            border-radius: 10px;
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.8);
         }
         
         #gameCanvas {
             background-color: #2d5a2d;
-            border: 3px solid #333;
-            border-radius: 10px;
-            box-shadow: 0 0 15px rgba(0, 0, 0, 0.8);
+            display: block;
         }
         
         .controls {
@@ -91,6 +94,14 @@
         
         .buy-btn:hover {
             background: linear-gradient(to bottom, #FFA726, #FF9800);
+        }
+        
+        .weapon-btn {
+            background: linear-gradient(to bottom, #9C27B0, #7B1FA2);
+        }
+        
+        .weapon-btn:hover {
+            background: linear-gradient(to bottom, #AB47BC, #8E24AA);
         }
         
         .stats {
@@ -162,25 +173,43 @@
             border: 3px solid #ff0000;
         }
         
-        .game-over h2 {
-            color: #ff0000;
-            margin-top: 0;
-        }
-        
         .shop {
             position: absolute;
             top: 20px;
             right: 20px;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             padding: 15px;
             border-radius: 10px;
             border: 2px solid #FFD700;
             display: none;
+            z-index: 100;
+            max-width: 300px;
         }
         
         .shop h3 {
             color: #FFD700;
             margin-top: 0;
+            text-align: center;
+        }
+        
+        .shop-item {
+            margin: 10px 0;
+            padding: 8px;
+            background: rgba(50, 50, 50, 0.7);
+            border-radius: 5px;
+        }
+        
+        .weapon-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 5px 0;
+        }
+        
+        .weapon-icon {
+            font-size: 20px;
+            width: 30px;
+            text-align: center;
         }
         
         .joystick-info {
@@ -188,14 +217,23 @@
             font-weight: bold;
         }
         
-        @media (max-width: 600px) {
+        @media (max-width: 1000px) {
+            .container {
+                max-width: 95%;
+                padding: 10px;
+            }
+            
             .controls {
                 flex-direction: column;
                 align-items: center;
             }
             
-            #gameCanvas {
+            .game-container {
                 width: 95%;
+            }
+            
+            #gameCanvas {
+                width: 100%;
                 height: auto;
             }
             
@@ -209,6 +247,7 @@
                 top: 0;
                 right: 0;
                 margin: 10px auto;
+                max-width: 90%;
             }
         }
     </style>
@@ -239,16 +278,12 @@
                 <div class="health" id="healthDisplay">❤️❤️❤️❤️❤️</div>
             </div>
             <div class="stat">
+                <span>Оружие:</span>
+                <span id="weapon" class="stat-value">Обычное (3)</span>
+            </div>
+            <div class="stat">
                 <span>Выживание:</span>
                 <span id="survivalTime" class="stat-value">0 сек</span>
-            </div>
-            <div class="stat">
-                <span>След. враг:</span>
-                <span id="nextEnemy" class="stat-value">10 сек</span>
-            </div>
-            <div class="stat">
-                <span>След. патроны:</span>
-                <span id="nextAmmo" class="stat-value">30 сек</span>
             </div>
         </div>
         
@@ -266,9 +301,36 @@
             
             <div id="shop" class="shop">
                 <h3>Магазин</h3>
-                <p>5 патронов за 5 монет</p>
-                <button id="buyAmmoButton" class="buy-btn">Купить патроны (5)</button>
-                <button id="closeShopButton">Закрыть</button>
+                
+                <div class="shop-item">
+                    <p>5 патронов - 5 монет</p>
+                    <button id="buyAmmoButton" class="buy-btn">Купить патроны</button>
+                </div>
+                
+                <div class="shop-item">
+                    <p>Доп. жизнь - 10 монет</p>
+                    <button id="buyHealthButton" class="buy-btn">Купить жизнь</button>
+                </div>
+                
+                <div class="shop-item">
+                    <p>Улучшенное оружие - 30 монет</p>
+                    <div class="weapon-info">
+                        <span class="weapon-icon">🔫</span>
+                        <span>Убивает за 2 выстрела</span>
+                    </div>
+                    <button id="buyWeapon2Button" class="weapon-btn">Купить</button>
+                </div>
+                
+                <div class="shop-item">
+                    <p>Мощное оружие - 50 монет</p>
+                    <div class="weapon-info">
+                        <span class="weapon-icon">💥</span>
+                        <span>Убивает за 1 выстрел</span>
+                    </div>
+                    <button id="buyWeapon3Button" class="weapon-btn">Купить</button>
+                </div>
+                
+                <button id="closeShopButton">Закрыть магазин</button>
             </div>
         </div>
         
@@ -284,7 +346,7 @@
             <div class="control-group">
                 <h3>Действия</h3>
                 <button id="shootButton" class="shoot-btn">Стрелять</button>
-                <button id="openShopButton" class="buy-btn">Магазин</button>
+                <button id="openShopButton" class="buy-btn">Магазин (M)</button>
                 <div>Направление: <span id="directionIndicator">↓</span></div>
             </div>
             
@@ -302,8 +364,8 @@
             <p>- Кнопок на экране (для мобильных устройств)</p>
             <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопки стрельбы или клавиши <span class="key">SPACE</span></p>
             <p>Направление стрельбы зависит от последнего движения</p>
-            <p>Собирайте патроны <span style="color: #FFD700; font-weight: bold">♦</span> и монеты <span style="color: #FFD700; font-weight: bold">$</span></p>
-            <p>Покупайте патроны в магазине (кнопка Магазин или клавиша <span class="key">M</span>)</p>
+            <p>Собирайте патроны <span style="color: #FFD700; font-weight: bold">♦</span>, монеты <span style="color: #FFD700; font-weight: bold">$</span> и жизни <span style="color: #00ff00; font-weight: bold">+</span></p>
+            <p>Покупайте улучшения в магазине (кнопка Магазин или клавиша <span class="key">M</span>)</p>
             <p>Избегайте врагов - у вас 5 жизней! Враги действуют как стены.</p>
         </div>
     </div>
@@ -311,8 +373,10 @@
     <script>
         // Константы и настройки игры
         const CELL_SIZE = 20;
-        const GRID_WIDTH = 40;
-        const GRID_HEIGHT = 30;
+        const GRID_WIDTH = 80;  // Увеличено в 4 раза
+        const GRID_HEIGHT = 60; // Увеличено в 4 раза
+        const VIEWPORT_WIDTH = 40;
+        const VIEWPORT_HEIGHT = 30;
         const PLAYER_CHAR = '@';
         const ENEMY_CHAR = '&';
         const BULLET_CHAR = '*';
@@ -321,8 +385,14 @@
         const COIN_CHAR = '$';
         const WALL_CHAR = '#';
         const MAX_HEALTH = 5;
-        const HITS_TO_KILL = 3;
-        const START_AMMO = 5;
+        const START_AMMO = 10;
+        
+        // Типы оружия
+        const WEAPON_TYPES = {
+            NORMAL: { damage: 1, hitsRequired: 3, cost: 0, name: "Обычное" },
+            IMPROVED: { damage: 2, hitsRequired: 2, cost: 30, name: "Улучшенное" },
+            POWERFUL: { damage: 3, hitsRequired: 1, cost: 50, name: "Мощное" }
+        };
         
         // Элементы DOM
         const canvas = document.getElementById('gameCanvas');
@@ -332,19 +402,21 @@
         const ammoElement = document.getElementById('ammo');
         const enemyCountElement = document.getElementById('enemyCount');
         const healthDisplayElement = document.getElementById('healthDisplay');
+        const weaponElement = document.getElementById('weapon');
         const survivalTimeElement = document.getElementById('survivalTime');
-        const nextEnemyElement = document.getElementById('nextEnemy');
-        const nextAmmoElement = document.getElementById('nextAmmo');
         const gameOverElement = document.getElementById('gameOver');
         const finalScoreElement = document.getElementById('finalScore');
         const finalCoinsElement = document.getElementById('finalCoins');
-        const finalTimeElement = document.getElementById('finalTime');
+        finalTimeElement = document.getElementById('finalTime');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
         const shootButton = document.getElementById('shootButton');
         const openShopButton = document.getElementById('openShopButton');
         const buyAmmoButton = document.getElementById('buyAmmoButton');
+        const buyHealthButton = document.getElementById('buyHealthButton');
+        const buyWeapon2Button = document.getElementById('buyWeapon2Button');
+        const buyWeapon3Button = document.getElementById('buyWeapon3Button');
         const closeShopButton = document.getElementById('closeShopButton');
         const shopElement = document.getElementById('shop');
         const directionIndicator = document.getElementById('directionIndicator');
@@ -362,7 +434,8 @@
                 y: GRID_HEIGHT / 2, 
                 health: MAX_HEALTH,
                 ammo: START_AMMO,
-                lastDirection: { x: 0, y: 1 }
+                lastDirection: { x: 0, y: 1 },
+                weapon: WEAPON_TYPES.NORMAL
             },
             enemies: [],
             bullets: [],
@@ -372,8 +445,10 @@
             maze: [],
             lastEnemySpawn: 0,
             lastAmmoSpawn: 0,
+            lastHealthSpawn: 0,
             enemySpawnInterval: 10,
             ammoSpawnInterval: 30,
+            healthSpawnInterval: 60,
             lastUpdate: 0,
             survivalTime: 0,
             score: 0,
@@ -381,8 +456,40 @@
             isRunning: false,
             gameOver: false,
             lastHitTime: 0,
-            hitCooldown: 1
+            hitCooldown: 1,
+            camera: { x: 0, y: 0 }
         };
+        
+        // Обновление позиции камеры
+        function updateCamera() {
+            gameState.camera.x = Math.max(0, Math.min(
+                gameState.player.x - VIEWPORT_WIDTH / 2,
+                GRID_WIDTH - VIEWPORT_WIDTH
+            ));
+            
+            gameState.camera.y = Math.max(0, Math.min(
+                gameState.player.y - VIEWPORT_HEIGHT / 2,
+                GRID_HEIGHT - VIEWPORT_HEIGHT
+            ));
+        }
+        
+        // Преобразование координат карты в координаты экрана
+        function toScreenX(mapX) {
+            return (mapX - gameState.camera.x) * CELL_SIZE;
+        }
+        
+        function toScreenY(mapY) {
+            return (mapY - gameState.camera.y) * CELL_SIZE;
+        }
+        
+        // Преобразование координат экрана в координаты карты
+        function toMapX(screenX) {
+            return Math.floor(screenX / CELL_SIZE + gameState.camera.x);
+        }
+        
+        function toMapY(screenY) {
+            return Math.floor(screenY / CELL_SIZE + gameState.camera.y);
+        }
         
         // Создание лабиринта
         function createMaze() {
@@ -399,8 +506,8 @@
                 maze[i][GRID_WIDTH-1] = 1;
             }
             
-            // Меньше стен
-            const wallCount = Math.floor(GRID_WIDTH * GRID_HEIGHT * 0.1);
+            // Меньше стен для большой карты
+            const wallCount = Math.floor(GRID_WIDTH * GRID_HEIGHT * 0.08);
             
             for (let i = 0; i < wallCount; i++) {
                 const x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
@@ -413,7 +520,7 @@
                         const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]];
                         const dir = directions[Math.floor(Math.random() * directions.length)];
                         
-                        for (let j = 1; j <= 2; j++) {
+                        for (let j = 1; j <= 3; j++) {
                             const nx = x + dir[0] * j;
                             const ny = y + dir[1] * j;
                             
@@ -429,8 +536,8 @@
             const playerX = Math.floor(GRID_WIDTH / 2);
             const playerY = Math.floor(GRID_HEIGHT / 2);
             
-            for (let dy = -2; dy <= 2; dy++) {
-                for (let dx = -2; dx <= 2; dx++) {
+            for (let dy = -3; dy <= 3; dy++) {
+                for (let dx = -3; dx <= 3; dx++) {
                     if (playerY + dy >= 0 && playerY + dy < GRID_HEIGHT && 
                         playerX + dx >= 0 && playerX + dx < GRID_WIDTH) {
                         maze[playerY + dy][playerX + dx] = 0;
@@ -450,7 +557,6 @@
             const getKey = (x, y) => `${x},${y}`;
             
             while (openSet.length > 0) {
-                // Находим узел с наименьшей общей стоимостью
                 let currentIndex = 0;
                 for (let i = 1; i < openSet.length; i++) {
                     if (openSet[i].g + openSet[i].h < openSet[currentIndex].g + openSet[currentIndex].h) {
@@ -460,7 +566,6 @@
                 
                 const current = openSet[currentIndex];
                 
-                // Если достигли цели, восстанавливаем путь
                 if (current.x === targetX && current.y === targetY) {
                     const path = [];
                     let temp = current;
@@ -471,18 +576,15 @@
                     return path.reverse();
                 }
                 
-                // Перемещаем текущий узел в закрытый набор
                 openSet.splice(currentIndex, 1);
                 closedSet.add(getKey(current.x, current.y));
                 
-                // Проверяем соседей
                 const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
                 for (const [dx, dy] of directions) {
                     const nx = current.x + dx;
                     const ny = current.y + dy;
                     const neighborKey = getKey(nx, ny);
                     
-                    // Пропускаем стены и уже проверенные узлы
                     if (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || 
                         gameState.maze[ny][nx] === 1 || closedSet.has(neighborKey)) {
                         continue;
@@ -507,7 +609,7 @@
                 }
             }
             
-            return []; // Путь не найден
+            return [];
         }
         
         // Проверка возможности движения для игрока
@@ -535,8 +637,8 @@
                 y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 attempts++;
             } while ((gameState.maze[y][x] === 1 || 
-                     Math.abs(x - gameState.player.x) < 8 || 
-                     Math.abs(y - gameState.player.y) < 8) && 
+                     Math.abs(x - gameState.player.x) < 15 || 
+                     Math.abs(y - gameState.player.y) < 15) && 
                      attempts < 100);
             
             if (attempts < 100) {
@@ -561,12 +663,34 @@
                 y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 attempts++;
             } while ((gameState.maze[y][x] === 1 || 
-                     Math.abs(x - gameState.player.x) < 5 || 
-                     Math.abs(y - gameState.player.y) < 5) && 
+                     Math.abs(x - gameState.player.x) < 10 || 
+                     Math.abs(y - gameState.player.y) < 10) && 
                      attempts < 100);
             
             if (attempts < 100) {
                 gameState.ammoPacks.push({
+                    x: x,
+                    y: y
+                });
+            }
+        }
+        
+        // Спавн здоровья
+        function spawnHealthPack() {
+            let x, y;
+            let attempts = 0;
+            
+            do {
+                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
+                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
+                attempts++;
+            } while ((gameState.maze[y][x] === 1 || 
+                     Math.abs(x - gameState.player.x) < 10 || 
+                     Math.abs(y - gameState.player.y) < 10) && 
+                     attempts < 100);
+            
+            if (attempts < 100) {
+                gameState.healthPacks.push({
                     x: x,
                     y: y
                 });
@@ -582,21 +706,18 @@
                 if (enemy.lastMove >= 0.5) {
                     enemy.lastMove = 0;
                     
-                    // Обновляем путь каждые 2 секунды
                     if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
                         enemy.pathUpdateTime = 0;
                         enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y);
                     }
                     
-                    // Двигаемся по пути
                     if (enemy.path && enemy.path.length > 1) {
                         const nextStep = enemy.path[1];
                         enemy.x = nextStep.x;
                         enemy.y = nextStep.y;
-                        enemy.path.shift(); // Удаляем пройденный шаг
+                        enemy.path.shift();
                     }
                     
-                    // Проверка столкновения с игроком
                     if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
                         playerHit();
                     }
@@ -627,18 +748,16 @@
                     continue;
                 }
                 
-                // Проверяем столкновение с врагами
                 for (let j = gameState.enemies.length - 1; j >= 0; j--) {
                     const enemy = gameState.enemies[j];
                     
                     if (Math.floor(bullet.x) === enemy.x && Math.floor(bullet.y) === enemy.y) {
-                        enemy.hits++;
+                        enemy.hits += gameState.player.weapon.damage;
                         
-                        if (enemy.hits >= HITS_TO_KILL) {
+                        if (enemy.hits >= gameState.player.weapon.hitsRequired) {
                             gameState.enemies.splice(j, 1);
                             gameState.score += 10;
                             gameState.coinsCount += 1;
-                            // Спавн монеты на месте убитого врага
                             gameState.coins.push({
                                 x: enemy.x,
                                 y: enemy.y
@@ -654,10 +773,8 @@
         
         // Проверка сбора предметов
         function checkItemCollection() {
-            // Проверка здоровья
             for (let i = gameState.healthPacks.length - 1; i >= 0; i--) {
                 const healthPack = gameState.healthPacks[i];
-                
                 if (healthPack.x === gameState.player.x && healthPack.y === gameState.player.y) {
                     if (gameState.player.health < MAX_HEALTH) {
                         gameState.player.health++;
@@ -668,10 +785,8 @@
                 }
             }
             
-            // Проверка патронов
             for (let i = gameState.ammoPacks.length - 1; i >= 0; i--) {
                 const ammoPack = gameState.ammoPacks[i];
-                
                 if (ammoPack.x === gameState.player.x && ammoPack.y === gameState.player.y) {
                     gameState.player.ammo += 5;
                     updateAmmoDisplay();
@@ -680,10 +795,8 @@
                 }
             }
             
-            // Проверка монет
             for (let i = gameState.coins.length - 1; i >= 0; i--) {
                 const coin = gameState.coins[i];
-                
                 if (coin.x === gameState.player.x && coin.y === gameState.player.y) {
                     gameState.coinsCount++;
                     gameState.coins.splice(i, 1);
@@ -725,6 +838,10 @@
             coinsElement.textContent = gameState.coinsCount;
         }
         
+        function updateWeaponDisplay() {
+            weaponElement.textContent = `${gameState.player.weapon.name} (${gameState.player.weapon.hitsRequired})`;
+        }
+        
         // Выстрел
         function shoot() {
             if (gameState.player.ammo <= 0) return;
@@ -757,6 +874,26 @@
             }
         }
         
+        // Покупка здоровья
+        function buyHealth() {
+            if (gameState.coinsCount >= 10 && gameState.player.health < MAX_HEALTH) {
+                gameState.coinsCount -= 10;
+                gameState.player.health++;
+                updateCoinsDisplay();
+                updateHealthDisplay();
+            }
+        }
+        
+        // Покупка оружия
+        function buyWeapon(weaponType) {
+            if (gameState.coinsCount >= weaponType.cost) {
+                gameState.coinsCount -= weaponType.cost;
+                gameState.player.weapon = weaponType;
+                updateCoinsDisplay();
+                updateWeaponDisplay();
+            }
+        }
+        
         // Обновление индикатора направления
         function updateDirectionIndicator() {
             const dx = gameState.player.lastDirection.x;
@@ -773,98 +910,116 @@
             ctx.fillStyle = '#2d5a2d';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Отрисовка лабиринта
-            for (let y = 0; y < GRID_HEIGHT; y++) {
-                for (let x = 0; x < GRID_WIDTH; x++) {
+            // Отрисовка видимой части лабиринта
+            const startX = Math.max(0, Math.floor(gameState.camera.x));
+            const endX = Math.min(GRID_WIDTH, Math.floor(gameState.camera.x + VIEWPORT_WIDTH) + 1);
+            const startY = Math.max(0, Math.floor(gameState.camera.y));
+            const endY = Math.min(GRID_HEIGHT, Math.floor(gameState.camera.y + VIEWPORT_HEIGHT) + 1);
+            
+            for (let y = startY; y < endY; y++) {
+                for (let x = startX; x < endX; x++) {
                     if (gameState.maze[y][x] === 1) {
                         ctx.fillStyle = '#34495e';
-                        ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        ctx.fillRect(toScreenX(x), toScreenY(y), CELL_SIZE, CELL_SIZE);
                         
                         ctx.strokeStyle = '#2c3e50';
-                        ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                        ctx.strokeRect(toScreenX(x), toScreenY(y), CELL_SIZE, CELL_SIZE);
                     }
                 }
             }
             
             // Отрисовка здоровья
             for (const healthPack of gameState.healthPacks) {
-                ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
-                ctx.fillRect(healthPack.x * CELL_SIZE, healthPack.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-                
-                ctx.font = '16px Arial';
-                ctx.fillStyle = 'white';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(HEALTH_CHAR, healthPack.x * CELL_SIZE + CELL_SIZE/2, healthPack.y * CELL_SIZE + CELL_SIZE/2);
+                if (healthPack.x >= startX && healthPack.x < endX && healthPack.y >= startY && healthPack.y < endY) {
+                    ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+                    ctx.fillRect(toScreenX(healthPack.x), toScreenY(healthPack.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(HEALTH_CHAR, toScreenX(healthPack.x) + CELL_SIZE/2, toScreenY(healthPack.y) + CELL_SIZE/2);
+                }
             }
             
             // Отрисовка патронов
             for (const ammoPack of gameState.ammoPacks) {
-                ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
-                ctx.fillRect(ammoPack.x * CELL_SIZE, ammoPack.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-                
-                ctx.font = '16px Arial';
-                ctx.fillStyle = 'white';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(AMMO_CHAR, ammoPack.x * CELL_SIZE + CELL_SIZE/2, ammoPack.y * CELL_SIZE + CELL_SIZE/2);
+                if (ammoPack.x >= startX && ammoPack.x < endX && ammoPack.y >= startY && ammoPack.y < endY) {
+                    ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+                    ctx.fillRect(toScreenX(ammoPack.x), toScreenY(ammoPack.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(AMMO_CHAR, toScreenX(ammoPack.x) + CELL_SIZE/2, toScreenY(ammoPack.y) + CELL_SIZE/2);
+                }
             }
             
             // Отрисовка монет
             for (const coin of gameState.coins) {
-                ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
-                ctx.beginPath();
-                ctx.arc(coin.x * CELL_SIZE + CELL_SIZE/2, coin.y * CELL_SIZE + CELL_SIZE/2, CELL_SIZE/2, 0, Math.PI * 2);
-                ctx.fill();
-                
-                ctx.font = '14px Arial';
-                ctx.fillStyle = 'black';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(COIN_CHAR, coin.x * CELL_SIZE + CELL_SIZE/2, coin.y * CELL_SIZE + CELL_SIZE/2);
+                if (coin.x >= startX && coin.x < endX && coin.y >= startY && coin.y < endY) {
+                    ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+                    ctx.beginPath();
+                    ctx.arc(toScreenX(coin.x) + CELL_SIZE/2, toScreenY(coin.y) + CELL_SIZE/2, CELL_SIZE/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.font = '14px Arial';
+                    ctx.fillStyle = 'black';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(COIN_CHAR, toScreenX(coin.x) + CELL_SIZE/2, toScreenY(coin.y) + CELL_SIZE/2);
+                }
             }
             
             // Отрисовка пуль
             for (const bullet of gameState.bullets) {
-                ctx.fillStyle = '#ffeb3b';
-                ctx.beginPath();
-                ctx.arc(bullet.x * CELL_SIZE, bullet.y * CELL_SIZE, CELL_SIZE / 3, 0, Math.PI * 2);
-                ctx.fill();
+                const screenX = toScreenX(bullet.x);
+                const screenY = toScreenY(bullet.y);
                 
-                ctx.font = '14px Arial';
-                ctx.fillStyle = 'black';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(BULLET_CHAR, bullet.x * CELL_SIZE, bullet.y * CELL_SIZE);
+                if (screenX >= -CELL_SIZE && screenX <= canvas.width && screenY >= -CELL_SIZE && screenY <= canvas.height) {
+                    ctx.fillStyle = '#ffeb3b';
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, CELL_SIZE / 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.font = '14px Arial';
+                    ctx.fillStyle = 'black';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(BULLET_CHAR, screenX, screenY);
+                }
             }
             
             // Отрисовка врагов
             for (const enemy of gameState.enemies) {
-                const intensity = 1 - (enemy.hits / HITS_TO_KILL) * 0.5;
-                ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
-                
-                ctx.fillRect(enemy.x * CELL_SIZE, enemy.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
-                
-                ctx.font = '16px Arial';
-                ctx.fillStyle = 'white';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(ENEMY_CHAR, enemy.x * CELL_SIZE + CELL_SIZE/2, enemy.y * CELL_SIZE + CELL_SIZE/2);
-                
-                ctx.fillStyle = 'white';
-                ctx.font = '10px Arial';
-                ctx.fillText(`${enemy.hits}/${HITS_TO_KILL}`, enemy.x * CELL_SIZE + CELL_SIZE/2, enemy.y * CELL_SIZE + CELL_SIZE - 3);
+                if (enemy.x >= startX && enemy.x < endX && enemy.y >= startY && enemy.y < endY) {
+                    const intensity = 1 - (enemy.hits / gameState.player.weapon.hitsRequired) * 0.5;
+                    ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
+                    
+                    ctx.fillRect(toScreenX(enemy.x), toScreenY(enemy.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(ENEMY_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(`${enemy.hits}/${gameState.player.weapon.hitsRequired}`, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE - 3);
+                }
             }
             
             // Отрисовка игрока
             ctx.fillStyle = gameState.lastHitTime > Date.now() / 1000 - 0.5 ? '#ff0000' : '#3498db';
-            ctx.fillRect(gameState.player.x * CELL_SIZE, gameState.player.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+            ctx.fillRect(toScreenX(gameState.player.x), toScreenY(gameState.player.y), CELL_SIZE, CELL_SIZE);
             
             ctx.font = '16px Arial';
             ctx.fillStyle = 'white';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.fillText(PLAYER_CHAR, gameState.player.x * CELL_SIZE + CELL_SIZE/2, gameState.player.y * CELL_SIZE + CELL_SIZE/2);
+            ctx.fillText(PLAYER_CHAR, toScreenX(gameState.player.x) + CELL_SIZE/2, toScreenY(gameState.player.y) + CELL_SIZE/2);
         }
         
         // Обновление игры
@@ -891,6 +1046,13 @@
                     gameState.lastAmmoSpawn = 0;
                 }
                 
+                // Спавн здоровья
+                gameState.lastHealthSpawn += deltaTime;
+                if (gameState.lastHealthSpawn >= gameState.healthSpawnInterval) {
+                    spawnHealthPack();
+                    gameState.lastHealthSpawn = 0;
+                }
+                
                 // Движение врагов
                 moveEnemies(deltaTime);
                 
@@ -899,6 +1061,9 @@
                 
                 // Проверка сбора предметов
                 checkItemCollection();
+                
+                // Обновление камеры
+                updateCamera();
                 
                 // Обновление статистики
                 updateStats();
@@ -917,8 +1082,6 @@
             coinsElement.textContent = gameState.coinsCount;
             enemyCountElement.textContent = gameState.enemies.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
-            nextEnemyElement.textContent = Math.ceil(gameState.enemySpawnInterval - gameState.lastEnemySpawn) + ' сек';
-            nextAmmoElement.textContent = Math.ceil(gameState.ammoSpawnInterval - gameState.lastAmmoSpawn) + ' сек';
         }
         
         // Обработка нажатий клавиш
@@ -996,7 +1159,8 @@
                 y: GRID_HEIGHT / 2, 
                 health: MAX_HEALTH,
                 ammo: START_AMMO,
-                lastDirection: { x: 0, y: 1 }
+                lastDirection: { x: 0, y: 1 },
+                weapon: WEAPON_TYPES.NORMAL
             };
             gameState.enemies = [];
             gameState.bullets = [];
@@ -1006,16 +1170,19 @@
             gameState.maze = createMaze();
             gameState.lastEnemySpawn = 0;
             gameState.lastAmmoSpawn = 0;
+            gameState.lastHealthSpawn = 0;
             gameState.survivalTime = 0;
             gameState.score = 0;
             gameState.coinsCount = 0;
             gameState.gameOver = false;
             gameState.lastUpdate = 0;
             gameState.lastHitTime = 0;
+            gameState.camera = { x: 0, y: 0 };
             
             updateHealthDisplay();
             updateAmmoDisplay();
             updateCoinsDisplay();
+            updateWeaponDisplay();
             updateDirectionIndicator();
             gameOverElement.style.display = 'none';
             shopElement.style.display = 'none';
@@ -1043,6 +1210,7 @@
             updateHealthDisplay();
             updateAmmoDisplay();
             updateCoinsDisplay();
+            updateWeaponDisplay();
             updateDirectionIndicator();
             
             // Назначение обработчиков событий
@@ -1054,6 +1222,9 @@
             openShopButton.addEventListener('click', () => shopElement.style.display = 'block');
             closeShopButton.addEventListener('click', () => shopElement.style.display = 'none');
             buyAmmoButton.addEventListener('click', buyAmmo);
+            buyHealthButton.addEventListener('click', buyHealth);
+            buyWeapon2Button.addEventListener('click', () => buyWeapon(WEAPON_TYPES.IMPROVED));
+            buyWeapon3Button.addEventListener('click', () => buyWeapon(WEAPON_TYPES.POWERFUL));
             
             // Назначение обработчиков для кнопок управления
             upButton.addEventListener('click', () => {
@@ -1089,6 +1260,7 @@
             });
             
             // Первоначальная отрисовка
+            updateCamera();
             render();
         }
         
