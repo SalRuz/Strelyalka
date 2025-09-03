@@ -77,6 +77,14 @@
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
         }
         
+        .shoot-btn {
+            background: linear-gradient(to bottom, #f44336, #d32f2f);
+        }
+        
+        .shoot-btn:hover {
+            background: linear-gradient(to bottom, #ef5350, #e53935);
+        }
+        
         .stats {
             display: flex;
             justify-content: space-around;
@@ -85,16 +93,28 @@
             background: rgba(0, 0, 0, 0.5);
             padding: 10px;
             border-radius: 8px;
+            flex-wrap: wrap;
         }
         
         .stat {
             display: flex;
             flex-direction: column;
+            margin: 5px 10px;
         }
         
         .stat-value {
             font-weight: bold;
             color: #ffcc00;
+        }
+        
+        .health {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .heart {
+            color: #ff5252;
+            font-size: 24px;
         }
         
         .instructions {
@@ -154,6 +174,11 @@
                 width: 95%;
                 height: auto;
             }
+            
+            .stats {
+                flex-direction: column;
+                align-items: center;
+            }
         }
     </style>
 </head>
@@ -163,8 +188,16 @@
         
         <div class="stats">
             <div class="stat">
+                <span>Очки:</span>
+                <span id="score" class="stat-value">0</span>
+            </div>
+            <div class="stat">
                 <span>Врагов:</span>
                 <span id="enemyCount" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span>Жизни:</span>
+                <div class="health" id="healthDisplay">❤️❤️❤️❤️❤️</div>
             </div>
             <div class="stat">
                 <span>Выживание:</span>
@@ -181,7 +214,8 @@
             
             <div id="gameOver" class="game-over">
                 <h2>Игра окончена!</h2>
-                <p>Вас поймал враг!</p>
+                <p>Вас поймали враги!</p>
+                <p>Набрано очков: <span id="finalScore">0</span></p>
                 <p>Время выживания: <span id="finalTime">0</span> секунд</p>
                 <button id="restartButton">Играть снова</button>
             </div>
@@ -198,6 +232,14 @@
             
             <div class="control-group">
                 <h3>Действия</h3>
+                <button id="shootUpButton">Стрелять ↑</button>
+                <button id="shootLeftButton">Стрелять ←</button>
+                <button id="shootRightButton">Стрелять →</button>
+                <button id="shootDownButton">Стрелять ↓</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>Игра</h3>
                 <button id="startButton">Старт</button>
                 <button id="pauseButton">Пауза</button>
             </div>
@@ -209,7 +251,8 @@
             <p>- Клавиш <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> или стрелок</p>
             <p>- Кнопок на экране (для мобильных устройств)</p>
             <p>- <span class="joystick-info">Джойстика</span> (если подключен)</p>
-            <p>Избегайте врагов <span style="color: #e74c3c; font-weight: bold">&</span> и стен!</p>
+            <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопок стрельбы или клавиш <span class="key">I</span><span class="key">J</span><span class="key">K</span><span class="key">L</span></p>
+            <p>Избегайте врагов - у вас 5 жизней!</p>
             <p>Каждые 10 секунд появляется новый враг!</p>
         </div>
     </div>
@@ -221,15 +264,20 @@
         const GRID_HEIGHT = 30;
         const PLAYER_CHAR = '@';
         const ENEMY_CHAR = '&';
+        const BULLET_CHAR = '*';
         const WALL_CHAR = '#';
+        const MAX_HEALTH = 5;
         
         // Элементы DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
         const enemyCountElement = document.getElementById('enemyCount');
+        const healthDisplayElement = document.getElementById('healthDisplay');
         const survivalTimeElement = document.getElementById('survivalTime');
         const nextEnemyElement = document.getElementById('nextEnemy');
         const gameOverElement = document.getElementById('gameOver');
+        const finalScoreElement = document.getElementById('finalScore');
         const finalTimeElement = document.getElementById('finalTime');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
@@ -240,22 +288,30 @@
         const leftButton = document.getElementById('leftButton');
         const downButton = document.getElementById('downButton');
         const rightButton = document.getElementById('rightButton');
+        const shootUpButton = document.getElementById('shootUpButton');
+        const shootLeftButton = document.getElementById('shootLeftButton');
+        const shootRightButton = document.getElementById('shootRightButton');
+        const shootDownButton = document.getElementById('shootDownButton');
         
         // Состояние игры
         let gameState = {
-            player: { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2 },
+            player: { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2, health: MAX_HEALTH },
             enemies: [],
+            bullets: [],
             maze: [],
             lastEnemySpawn: 0,
             enemySpawnInterval: 10,
             lastUpdate: 0,
             survivalTime: 0,
+            score: 0,
             isRunning: false,
             gameOver: false,
-            joystick: null
+            joystick: null,
+            lastHitTime: 0,
+            hitCooldown: 1 // Задержка между получением урона
         };
         
-        // Создание лабиринта
+        // Создание лабиринта (уменьшенное количество стен)
         function createMaze() {
             const maze = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
             
@@ -270,21 +326,30 @@
                 maze[i][GRID_WIDTH-1] = 1;
             }
             
-            // Случайные стены
-            for (let i = 0; i < GRID_WIDTH * GRID_HEIGHT / 5; i++) {
+            // Меньше стен - только 10% от общего пространства
+            const wallCount = Math.floor(GRID_WIDTH * GRID_HEIGHT * 0.1);
+            
+            for (let i = 0; i < wallCount; i++) {
                 const x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
                 const y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 
-                maze[y][x] = 1;
-                
-                // Создаем структуры стен
-                if (Math.random() > 0.5) {
-                    for (let j = 0; j < 3; j++) {
-                        if (x + j < GRID_WIDTH - 1) maze[y][x + j] = 1;
-                    }
-                } else {
-                    for (let j = 0; j < 3; j++) {
-                        if (y + j < GRID_HEIGHT - 1) maze[y + j][x] = 1;
+                // Создаем отдельные стены вместо больших структур
+                if (maze[y][x] === 0) {
+                    maze[y][x] = 1;
+                    
+                    // Иногда создаем небольшие группы стен (2-3 блока)
+                    if (Math.random() > 0.7) {
+                        const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+                        const dir = directions[Math.floor(Math.random() * directions.length)];
+                        
+                        for (let j = 1; j <= 2; j++) {
+                            const nx = x + dir[0] * j;
+                            const ny = y + dir[1] * j;
+                            
+                            if (nx > 0 && nx < GRID_WIDTH - 1 && ny > 0 && ny < GRID_HEIGHT - 1) {
+                                maze[ny][nx] = 1;
+                            }
+                        }
                     }
                 }
             }
@@ -293,8 +358,8 @@
             const playerX = Math.floor(GRID_WIDTH / 2);
             const playerY = Math.floor(GRID_HEIGHT / 2);
             
-            for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -2; dy <= 2; dy++) {
+                for (let dx = -2; dx <= 2; dx++) {
                     if (playerY + dy >= 0 && playerY + dy < GRID_HEIGHT && 
                         playerX + dx >= 0 && playerX + dx < GRID_WIDTH) {
                         maze[playerY + dy][playerX + dx] = 0;
@@ -330,36 +395,153 @@
                 gameState.enemies.push({
                     x: x,
                     y: y,
-                    lastMove: 0
+                    lastMove: 0,
+                    path: [],
+                    pathUpdateTime: 0
                 });
             }
         }
         
-        // Движение врагов
-        function moveEnemies(deltaTime) {
-            for (const enemy of gameState.enemies) {
-                enemy.lastMove += deltaTime;
+        // Поиск пути для врага (упрощенный алгоритм)
+        function findPath(enemy, targetX, targetY) {
+            // Простой алгоритм движения к цели с обходом препятствий
+            const directions = [
+                [0, -1], [1, 0], [0, 1], [-1, 0],  // Вверх, право, низ, лево
+                [1, -1], [1, 1], [-1, 1], [-1, -1] // Диагонали
+            ];
+            
+            let bestDir = null;
+            let bestDist = Infinity;
+            
+            for (const [dx, dy] of directions) {
+                const nx = enemy.x + dx;
+                const ny = enemy.y + dy;
                 
-                if (enemy.lastMove >= 0.5) { // Замедляем врагов
-                    enemy.lastMove = 0;
+                if (canMove(nx, ny)) {
+                    const dist = Math.abs(nx - targetX) + Math.abs(ny - targetY);
                     
-                    // Простой ИИ: двигаемся к игроку
-                    const dx = gameState.player.x > enemy.x ? 1 : gameState.player.x < enemy.x ? -1 : 0;
-                    const dy = gameState.player.y > enemy.y ? 1 : gameState.player.y < enemy.y ? -1 : 0;
-                    
-                    // Пробуем двигаться по горизонтали или вертикали
-                    if (dx !== 0 && canMove(enemy.x + dx, enemy.y)) {
-                        enemy.x += dx;
-                    } else if (dy !== 0 && canMove(enemy.x, enemy.y + dy)) {
-                        enemy.y += dy;
-                    }
-                    
-                    // Проверка столкновения с игроком
-                    if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
-                        endGame();
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestDir = [dx, dy];
                     }
                 }
             }
+            
+            return bestDir;
+        }
+        
+        // Движение врагов с улучшенным ИИ
+        function moveEnemies(deltaTime) {
+            for (const enemy of gameState.enemies) {
+                enemy.lastMove += deltaTime;
+                enemy.pathUpdateTime += deltaTime;
+                
+                if (enemy.lastMove >= 0.5) {
+                    enemy.lastMove = 0;
+                    
+                    // Обновляем путь каждые 2 секунды или если путь пустой
+                    if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
+                        enemy.pathUpdateTime = 0;
+                        const direction = findPath(enemy, gameState.player.x, gameState.player.y);
+                        
+                        if (direction) {
+                            enemy.path = [direction];
+                        }
+                    }
+                    
+                    // Двигаемся по пути
+                    if (enemy.path.length > 0) {
+                        const [dx, dy] = enemy.path[0];
+                        const newX = enemy.x + dx;
+                        const newY = enemy.y + dy;
+                        
+                        if (canMove(newX, newY)) {
+                            enemy.x = newX;
+                            enemy.y = newY;
+                        } else {
+                            // Если не можем двигаться, очищаем путь для пересчета
+                            enemy.path = [];
+                        }
+                    }
+                    
+                    // Проверка столкновения с игроком
+                    if (Math.abs(enemy.x - gameState.player.x) <= 1 && 
+                        Math.abs(enemy.y - gameState.player.y) <= 1) {
+                        playerHit();
+                    }
+                }
+            }
+        }
+        
+        // Движение пуль
+        function moveBullets(deltaTime) {
+            for (let i = gameState.bullets.length - 1; i >= 0; i--) {
+                const bullet = gameState.bullets[i];
+                bullet.lifetime -= deltaTime;
+                
+                if (bullet.lifetime <= 0) {
+                    gameState.bullets.splice(i, 1);
+                    continue;
+                }
+                
+                // Двигаем пулю
+                bullet.x += bullet.dx;
+                bullet.y += bullet.dy;
+                
+                // Проверяем столкновение со стенами
+                if (!canMove(Math.floor(bullet.x), Math.floor(bullet.y))) {
+                    gameState.bullets.splice(i, 1);
+                    continue;
+                }
+                
+                // Проверяем столкновение с врагами
+                for (let j = gameState.enemies.length - 1; j >= 0; j--) {
+                    const enemy = gameState.enemies[j];
+                    
+                    if (Math.abs(bullet.x - enemy.x) < 0.5 && Math.abs(bullet.y - enemy.y) < 0.5) {
+                        gameState.enemies.splice(j, 1);
+                        gameState.bullets.splice(i, 1);
+                        gameState.score += 10;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Игрок получает урон
+        function playerHit() {
+            const currentTime = Date.now() / 1000;
+            
+            if (currentTime - gameState.lastHitTime >= gameState.hitCooldown) {
+                gameState.player.health--;
+                gameState.lastHitTime = currentTime;
+                updateHealthDisplay();
+                
+                if (gameState.player.health <= 0) {
+                    endGame();
+                }
+            }
+        }
+        
+        // Обновление отображения здоровья
+        function updateHealthDisplay() {
+            let hearts = '';
+            for (let i = 0; i < MAX_HEALTH; i++) {
+                hearts += i < gameState.player.health ? '❤️' : '♡';
+            }
+            healthDisplayElement.innerHTML = hearts;
+        }
+        
+        // Выстрел
+        function shoot(dx, dy) {
+            gameState.bullets.push({
+                x: gameState.player.x + 0.5,
+                y: gameState.player.y + 0.5,
+                dx: dx,
+                dy: dy,
+                speed: 0.2,
+                lifetime: 2
+            });
         }
         
         // Отрисовка игры
@@ -381,6 +563,20 @@
                 }
             }
             
+            // Отрисовка пуль
+            for (const bullet of gameState.bullets) {
+                ctx.fillStyle = '#ffeb3b';
+                ctx.beginPath();
+                ctx.arc(bullet.x * CELL_SIZE, bullet.y * CELL_SIZE, CELL_SIZE / 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.font = '14px Arial';
+                ctx.fillStyle = 'black';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(BULLET_CHAR, bullet.x * CELL_SIZE, bullet.y * CELL_SIZE);
+            }
+            
             // Отрисовка врагов
             for (const enemy of gameState.enemies) {
                 ctx.fillStyle = '#e74c3c';
@@ -394,7 +590,7 @@
             }
             
             // Отрисовка игрока
-            ctx.fillStyle = '#3498db';
+            ctx.fillStyle = gameState.lastHitTime > Date.now() / 1000 - 0.5 ? '#ff0000' : '#3498db';
             ctx.fillRect(gameState.player.x * CELL_SIZE, gameState.player.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
             
             ctx.font = '16px Arial';
@@ -424,6 +620,9 @@
                 // Движение врагов
                 moveEnemies(deltaTime);
                 
+                // Движение пуль
+                moveBullets(deltaTime);
+                
                 // Обновление статистики
                 updateStats();
             }
@@ -437,6 +636,7 @@
         
         // Обновление статистики
         function updateStats() {
+            scoreElement.textContent = gameState.score;
             enemyCountElement.textContent = gameState.enemies.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
             nextEnemyElement.textContent = Math.ceil(gameState.enemySpawnInterval - gameState.lastEnemySpawn) + ' сек';
@@ -470,19 +670,27 @@
                 case 'D':
                     newX++;
                     break;
+                case 'i':
+                case 'I':
+                    shoot(0, -1);
+                    break;
+                case 'j':
+                case 'J':
+                    shoot(-1, 0);
+                    break;
+                case 'k':
+                case 'K':
+                    shoot(0, 1);
+                    break;
+                case 'l':
+                case 'L':
+                    shoot(1, 0);
+                    break;
             }
             
             if (canMove(newX, newY)) {
                 gameState.player.x = newX;
                 gameState.player.y = newY;
-                
-                // Проверка столкновения с врагами после движения
-                for (const enemy of gameState.enemies) {
-                    if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
-                        endGame();
-                        break;
-                    }
-                }
             }
         }
         
@@ -490,20 +698,25 @@
         function endGame() {
             gameState.isRunning = false;
             gameState.gameOver = true;
+            finalScoreElement.textContent = gameState.score;
             finalTimeElement.textContent = Math.floor(gameState.survivalTime);
             gameOverElement.style.display = 'block';
         }
         
         // Перезапуск игры
         function restartGame() {
-            gameState.player = { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2 };
+            gameState.player = { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2, health: MAX_HEALTH };
             gameState.enemies = [];
+            gameState.bullets = [];
             gameState.maze = createMaze();
             gameState.lastEnemySpawn = 0;
             gameState.survivalTime = 0;
+            gameState.score = 0;
             gameState.gameOver = false;
             gameState.lastUpdate = 0;
+            gameState.lastHitTime = 0;
             
+            updateHealthDisplay();
             gameOverElement.style.display = 'none';
             
             startGame();
@@ -523,62 +736,10 @@
             gameState.isRunning = false;
         }
         
-        // Инициализация джойстика
-        function initJoystick() {
-            if (navigator.getGamepads && navigator.getGamepads()[0]) {
-                gameState.joystick = navigator.getGamepads()[0];
-                console.log('Джойстик подключен:', gameState.joystick.id);
-            }
-            
-            window.addEventListener('gamepadconnected', (event) => {
-                gameState.joystick = event.gamepad;
-                console.log('Джойстик подключен:', gameState.joystick.id);
-            });
-            
-            window.addEventListener('gamepaddisconnected', (event) => {
-                console.log('Джойстик отключен:', event.gamepad.id);
-                gameState.joystick = null;
-            });
-        }
-        
-        // Проверка состояния джойстика
-        function checkJoystick() {
-            if (!gameState.joystick || gameState.gameOver) return;
-            
-            const gamepad = navigator.getGamepads()[gameState.joystick.index];
-            if (!gamepad) return;
-            
-            // Левый стик (оси 0 и 1)
-            const xAxis = gamepad.axes[0];
-            const yAxis = gamepad.axes[1];
-            
-            const deadZone = 0.5;
-            let newX = gameState.player.x;
-            let newY = gameState.player.y;
-            
-            if (xAxis > deadZone) newX++;
-            else if (xAxis < -deadZone) newX--;
-            
-            if (yAxis > deadZone) newY++;
-            else if (yAxis < -deadZone) newY--;
-            
-            if ((newX !== gameState.player.x || newY !== gameState.player.y) && canMove(newX, newY)) {
-                gameState.player.x = newX;
-                gameState.player.y = newY;
-                
-                // Проверка столкновения с врагами
-                for (const enemy of gameState.enemies) {
-                    if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
-                        endGame();
-                        break;
-                    }
-                }
-            }
-        }
-        
         // Инициализация игры
         function init() {
             gameState.maze = createMaze();
+            updateHealthDisplay();
             
             // Назначение обработчиков событий
             window.addEventListener('keydown', handleKeyDown);
@@ -590,46 +751,32 @@
             upButton.addEventListener('click', () => {
                 if (canMove(gameState.player.x, gameState.player.y - 1)) {
                     gameState.player.y--;
-                    checkEnemyCollision();
                 }
             });
             
             downButton.addEventListener('click', () => {
                 if (canMove(gameState.player.x, gameState.player.y + 1)) {
                     gameState.player.y++;
-                    checkEnemyCollision();
                 }
             });
             
             leftButton.addEventListener('click', () => {
                 if (canMove(gameState.player.x - 1, gameState.player.y)) {
                     gameState.player.x--;
-                    checkEnemyCollision();
                 }
             });
             
             rightButton.addEventListener('click', () => {
                 if (canMove(gameState.player.x + 1, gameState.player.y)) {
                     gameState.player.x++;
-                    checkEnemyCollision();
                 }
             });
             
-            // Проверка столкновения с врагами
-            function checkEnemyCollision() {
-                for (const enemy of gameState.enemies) {
-                    if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
-                        endGame();
-                        break;
-                    }
-                }
-            }
-            
-            // Инициализация джойстика
-            initJoystick();
-            
-            // Цикл проверки джойстика
-            setInterval(checkJoystick, 100);
+            // Кнопки стрельбы
+            shootUpButton.addEventListener('click', () => shoot(0, -1));
+            shootDownButton.addEventListener('click', () => shoot(0, 1));
+            shootLeftButton.addEventListener('click', () => shoot(-1, 0));
+            shootRightButton.addEventListener('click', () => shoot(1, 0));
             
             // Первоначальная отрисовка
             render();
