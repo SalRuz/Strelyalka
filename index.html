@@ -85,6 +85,14 @@
             background: linear-gradient(to bottom, #ef5350, #e53935);
         }
         
+        .buy-btn {
+            background: linear-gradient(to bottom, #FF9800, #F57C00);
+        }
+        
+        .buy-btn:hover {
+            background: linear-gradient(to bottom, #FFA726, #FF9800);
+        }
+        
         .stats {
             display: flex;
             justify-content: space-around;
@@ -159,6 +167,22 @@
             margin-top: 0;
         }
         
+        .shop {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #FFD700;
+            display: none;
+        }
+        
+        .shop h3 {
+            color: #FFD700;
+            margin-top: 0;
+        }
+        
         .joystick-info {
             color: #4fc3f7;
             font-weight: bold;
@@ -179,6 +203,13 @@
                 flex-direction: column;
                 align-items: center;
             }
+            
+            .shop {
+                position: relative;
+                top: 0;
+                right: 0;
+                margin: 10px auto;
+            }
         }
     </style>
 </head>
@@ -190,6 +221,14 @@
             <div class="stat">
                 <span>Очки:</span>
                 <span id="score" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span>Монеты:</span>
+                <span id="coins" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span>Патроны:</span>
+                <span id="ammo" class="stat-value">5/∞</span>
             </div>
             <div class="stat">
                 <span>Врагов:</span>
@@ -204,12 +243,12 @@
                 <span id="survivalTime" class="stat-value">0 сек</span>
             </div>
             <div class="stat">
-                <span>Следующий враг:</span>
+                <span>След. враг:</span>
                 <span id="nextEnemy" class="stat-value">10 сек</span>
             </div>
             <div class="stat">
-                <span>Следующее здоровье:</span>
-                <span id="nextHealth" class="stat-value">30 сек</span>
+                <span>След. патроны:</span>
+                <span id="nextAmmo" class="stat-value">30 сек</span>
             </div>
         </div>
         
@@ -220,8 +259,16 @@
                 <h2>Игра окончена!</h2>
                 <p>Вас поймали враги!</p>
                 <p>Набрано очков: <span id="finalScore">0</span></p>
+                <p>Собрано монет: <span id="finalCoins">0</span></p>
                 <p>Время выживания: <span id="finalTime">0</span> секунд</p>
                 <button id="restartButton">Играть снова</button>
+            </div>
+            
+            <div id="shop" class="shop">
+                <h3>Магазин</h3>
+                <p>5 патронов за 5 монет</p>
+                <button id="buyAmmoButton" class="buy-btn">Купить патроны (5)</button>
+                <button id="closeShopButton">Закрыть</button>
             </div>
         </div>
         
@@ -237,6 +284,7 @@
             <div class="control-group">
                 <h3>Действия</h3>
                 <button id="shootButton" class="shoot-btn">Стрелять</button>
+                <button id="openShopButton" class="buy-btn">Магазин</button>
                 <div>Направление: <span id="directionIndicator">↓</span></div>
             </div>
             
@@ -254,7 +302,8 @@
             <p>- Кнопок на экране (для мобильных устройств)</p>
             <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопки стрельбы или клавиши <span class="key">SPACE</span></p>
             <p>Направление стрельбы зависит от последнего движения</p>
-            <p>Каждые 30 секунд появляются дополнительные жизни <span style="color: #00ff00; font-weight: bold">+</span></p>
+            <p>Собирайте патроны <span style="color: #FFD700; font-weight: bold">♦</span> и монеты <span style="color: #FFD700; font-weight: bold">$</span></p>
+            <p>Покупайте патроны в магазине (кнопка Магазин или клавиша <span class="key">M</span>)</p>
             <p>Избегайте врагов - у вас 5 жизней! Враги действуют как стены.</p>
         </div>
     </div>
@@ -268,26 +317,36 @@
         const ENEMY_CHAR = '&';
         const BULLET_CHAR = '*';
         const HEALTH_CHAR = '+';
+        const AMMO_CHAR = '♦';
+        const COIN_CHAR = '$';
         const WALL_CHAR = '#';
         const MAX_HEALTH = 5;
         const HITS_TO_KILL = 3;
+        const START_AMMO = 5;
         
         // Элементы DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
         const scoreElement = document.getElementById('score');
+        const coinsElement = document.getElementById('coins');
+        const ammoElement = document.getElementById('ammo');
         const enemyCountElement = document.getElementById('enemyCount');
         const healthDisplayElement = document.getElementById('healthDisplay');
         const survivalTimeElement = document.getElementById('survivalTime');
         const nextEnemyElement = document.getElementById('nextEnemy');
-        const nextHealthElement = document.getElementById('nextHealth');
+        const nextAmmoElement = document.getElementById('nextAmmo');
         const gameOverElement = document.getElementById('gameOver');
         const finalScoreElement = document.getElementById('finalScore');
+        const finalCoinsElement = document.getElementById('finalCoins');
         const finalTimeElement = document.getElementById('finalTime');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
         const shootButton = document.getElementById('shootButton');
+        const openShopButton = document.getElementById('openShopButton');
+        const buyAmmoButton = document.getElementById('buyAmmoButton');
+        const closeShopButton = document.getElementById('closeShopButton');
+        const shopElement = document.getElementById('shop');
         const directionIndicator = document.getElementById('directionIndicator');
         
         // Кнопки управления
@@ -302,27 +361,30 @@
                 x: GRID_WIDTH / 2, 
                 y: GRID_HEIGHT / 2, 
                 health: MAX_HEALTH,
-                lastDirection: { x: 0, y: 1 } // Направление по умолчанию - вниз
+                ammo: START_AMMO,
+                lastDirection: { x: 0, y: 1 }
             },
             enemies: [],
             bullets: [],
             healthPacks: [],
+            ammoPacks: [],
+            coins: [],
             maze: [],
             lastEnemySpawn: 0,
-            lastHealthSpawn: 0,
+            lastAmmoSpawn: 0,
             enemySpawnInterval: 10,
-            healthSpawnInterval: 30,
+            ammoSpawnInterval: 30,
             lastUpdate: 0,
             survivalTime: 0,
             score: 0,
+            coinsCount: 0,
             isRunning: false,
             gameOver: false,
-            joystick: null,
             lastHitTime: 0,
-            hitCooldown: 1 // Задержка между получением урона
+            hitCooldown: 1
         };
         
-        // Создание лабиринта (уменьшенное количество стен)
+        // Создание лабиринта
         function createMaze() {
             const maze = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
             
@@ -337,18 +399,16 @@
                 maze[i][GRID_WIDTH-1] = 1;
             }
             
-            // Меньше стен - только 10% от общего пространства
+            // Меньше стен
             const wallCount = Math.floor(GRID_WIDTH * GRID_HEIGHT * 0.1);
             
             for (let i = 0; i < wallCount; i++) {
                 const x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
                 const y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 
-                // Создаем отдельные стены вместо больших структур
                 if (maze[y][x] === 0) {
                     maze[y][x] = 1;
                     
-                    // Иногда создаем небольшие группы стен (2-3 блока)
                     if (Math.random() > 0.7) {
                         const directions = [[1, 0], [-1, 0], [0, 1], [0, -1]];
                         const dir = directions[Math.floor(Math.random() * directions.length)];
@@ -381,38 +441,83 @@
             return maze;
         }
         
-        // Проверка возможности движения для игрока
-        function canPlayerMove(x, y) {
-            // Проверяем стены
-            if (x < 0 || x >= GRID_WIDTH || y < 0 || y >= GRID_HEIGHT || gameState.maze[y][x] === 1) {
-                return false;
-            }
+        // Поиск пути (упрощенный алгоритм A*)
+        function findPath(startX, startY, targetX, targetY) {
+            const openSet = [{x: startX, y: startY, g: 0, h: Math.abs(targetX - startX) + Math.abs(targetY - startY)}];
+            const closedSet = new Set();
+            const cameFrom = {};
             
-            // Проверяем врагов (они действуют как стены)
-            for (const enemy of gameState.enemies) {
-                if (enemy.x === x && enemy.y === y) {
-                    return false;
+            const getKey = (x, y) => `${x},${y}`;
+            
+            while (openSet.length > 0) {
+                // Находим узел с наименьшей общей стоимостью
+                let currentIndex = 0;
+                for (let i = 1; i < openSet.length; i++) {
+                    if (openSet[i].g + openSet[i].h < openSet[currentIndex].g + openSet[currentIndex].h) {
+                        currentIndex = i;
+                    }
+                }
+                
+                const current = openSet[currentIndex];
+                
+                // Если достигли цели, восстанавливаем путь
+                if (current.x === targetX && current.y === targetY) {
+                    const path = [];
+                    let temp = current;
+                    while (temp) {
+                        path.push({x: temp.x, y: temp.y});
+                        temp = cameFrom[getKey(temp.x, temp.y)];
+                    }
+                    return path.reverse();
+                }
+                
+                // Перемещаем текущий узел в закрытый набор
+                openSet.splice(currentIndex, 1);
+                closedSet.add(getKey(current.x, current.y));
+                
+                // Проверяем соседей
+                const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+                for (const [dx, dy] of directions) {
+                    const nx = current.x + dx;
+                    const ny = current.y + dy;
+                    const neighborKey = getKey(nx, ny);
+                    
+                    // Пропускаем стены и уже проверенные узлы
+                    if (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || 
+                        gameState.maze[ny][nx] === 1 || closedSet.has(neighborKey)) {
+                        continue;
+                    }
+                    
+                    const gScore = current.g + 1;
+                    let neighbor = openSet.find(n => n.x === nx && n.y === ny);
+                    
+                    if (!neighbor) {
+                        neighbor = {
+                            x: nx,
+                            y: ny,
+                            g: gScore,
+                            h: Math.abs(targetX - nx) + Math.abs(targetY - ny)
+                        };
+                        openSet.push(neighbor);
+                        cameFrom[neighborKey] = current;
+                    } else if (gScore < neighbor.g) {
+                        neighbor.g = gScore;
+                        cameFrom[neighborKey] = current;
+                    }
                 }
             }
             
-            return true;
+            return []; // Путь не найден
         }
         
-        // Проверка возможности движения для врагов
-        function canEnemyMove(x, y) {
-            // Проверяем стены
+        // Проверка возможности движения для игрока
+        function canPlayerMove(x, y) {
             if (x < 0 || x >= GRID_WIDTH || y < 0 || y >= GRID_HEIGHT || gameState.maze[y][x] === 1) {
                 return false;
             }
             
-            // Проверяем игрока (враги не могут занимать ту же клетку)
-            if (gameState.player.x === x && gameState.player.y === y) {
-                return false;
-            }
-            
-            // Проверяем других врагов (они действуют как стены друг для друга)
-            for (const otherEnemy of gameState.enemies) {
-                if (otherEnemy.x === x && otherEnemy.y === y) {
+            for (const enemy of gameState.enemies) {
+                if (enemy.x === x && enemy.y === y) {
                     return false;
                 }
             }
@@ -429,7 +534,7 @@
                 x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
                 y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 attempts++;
-            } while ((!canEnemyMove(x, y) || 
+            } while ((gameState.maze[y][x] === 1 || 
                      Math.abs(x - gameState.player.x) < 8 || 
                      Math.abs(y - gameState.player.y) < 8) && 
                      attempts < 100);
@@ -441,13 +546,13 @@
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
-                    hits: 0 // Количество попаданий
+                    hits: 0
                 });
             }
         }
         
-        // Спавн здоровья
-        function spawnHealthPack() {
+        // Спавн патронов
+        function spawnAmmoPack() {
             let x, y;
             let attempts = 0;
             
@@ -461,37 +566,11 @@
                      attempts < 100);
             
             if (attempts < 100) {
-                gameState.healthPacks.push({
+                gameState.ammoPacks.push({
                     x: x,
                     y: y
                 });
             }
-        }
-        
-        // Поиск пути для врага (упрощенный алгоритм)
-        function findPath(enemy, targetX, targetY) {
-            const directions = [
-                [0, -1], [1, 0], [0, 1], [-1, 0]  // Вверх, право, низ, лево
-            ];
-            
-            let bestDir = null;
-            let bestDist = Infinity;
-            
-            for (const [dx, dy] of directions) {
-                const nx = enemy.x + dx;
-                const ny = enemy.y + dy;
-                
-                if (canEnemyMove(nx, ny)) {
-                    const dist = Math.abs(nx - targetX) + Math.abs(ny - targetY);
-                    
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestDir = [dx, dy];
-                    }
-                }
-            }
-            
-            return bestDir;
         }
         
         // Движение врагов с улучшенным ИИ
@@ -503,29 +582,18 @@
                 if (enemy.lastMove >= 0.5) {
                     enemy.lastMove = 0;
                     
-                    // Обновляем путь каждые 2 секунды или если путь пустой
+                    // Обновляем путь каждые 2 секунды
                     if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
                         enemy.pathUpdateTime = 0;
-                        const direction = findPath(enemy, gameState.player.x, gameState.player.y);
-                        
-                        if (direction) {
-                            enemy.path = [direction];
-                        }
+                        enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y);
                     }
                     
                     // Двигаемся по пути
-                    if (enemy.path.length > 0) {
-                        const [dx, dy] = enemy.path[0];
-                        const newX = enemy.x + dx;
-                        const newY = enemy.y + dy;
-                        
-                        if (canEnemyMove(newX, newY)) {
-                            enemy.x = newX;
-                            enemy.y = newY;
-                        } else {
-                            // Если не можем двигаться, очищаем путь для пересчета
-                            enemy.path = [];
-                        }
+                    if (enemy.path && enemy.path.length > 1) {
+                        const nextStep = enemy.path[1];
+                        enemy.x = nextStep.x;
+                        enemy.y = nextStep.y;
+                        enemy.path.shift(); // Удаляем пройденный шаг
                     }
                     
                     // Проверка столкновения с игроком
@@ -547,11 +615,9 @@
                     continue;
                 }
                 
-                // Двигаем пулю
                 bullet.x += bullet.dx * bullet.speed;
                 bullet.y += bullet.dy * bullet.speed;
                 
-                // Проверяем столкновение со стенами
                 const gridX = Math.floor(bullet.x);
                 const gridY = Math.floor(bullet.y);
                 
@@ -571,6 +637,12 @@
                         if (enemy.hits >= HITS_TO_KILL) {
                             gameState.enemies.splice(j, 1);
                             gameState.score += 10;
+                            gameState.coinsCount += 1;
+                            // Спавн монеты на месте убитого врага
+                            gameState.coins.push({
+                                x: enemy.x,
+                                y: enemy.y
+                            });
                         }
                         
                         gameState.bullets.splice(i, 1);
@@ -580,8 +652,9 @@
             }
         }
         
-        // Проверка сбора здоровья
-        function checkHealthCollection() {
+        // Проверка сбора предметов
+        function checkItemCollection() {
+            // Проверка здоровья
             for (let i = gameState.healthPacks.length - 1; i >= 0; i--) {
                 const healthPack = gameState.healthPacks[i];
                 
@@ -591,6 +664,30 @@
                         updateHealthDisplay();
                     }
                     gameState.healthPacks.splice(i, 1);
+                    break;
+                }
+            }
+            
+            // Проверка патронов
+            for (let i = gameState.ammoPacks.length - 1; i >= 0; i--) {
+                const ammoPack = gameState.ammoPacks[i];
+                
+                if (ammoPack.x === gameState.player.x && ammoPack.y === gameState.player.y) {
+                    gameState.player.ammo += 5;
+                    updateAmmoDisplay();
+                    gameState.ammoPacks.splice(i, 1);
+                    break;
+                }
+            }
+            
+            // Проверка монет
+            for (let i = gameState.coins.length - 1; i >= 0; i--) {
+                const coin = gameState.coins[i];
+                
+                if (coin.x === gameState.player.x && coin.y === gameState.player.y) {
+                    gameState.coinsCount++;
+                    gameState.coins.splice(i, 1);
+                    updateCoinsDisplay();
                     break;
                 }
             }
@@ -611,7 +708,7 @@
             }
         }
         
-        // Обновление отображения здоровья
+        // Обновление отображения
         function updateHealthDisplay() {
             let hearts = '';
             for (let i = 0; i < MAX_HEALTH; i++) {
@@ -620,8 +717,18 @@
             healthDisplayElement.innerHTML = hearts;
         }
         
-        // Выстрел в последнем направлении движения
+        function updateAmmoDisplay() {
+            ammoElement.textContent = `${gameState.player.ammo}/∞`;
+        }
+        
+        function updateCoinsDisplay() {
+            coinsElement.textContent = gameState.coinsCount;
+        }
+        
+        // Выстрел
         function shoot() {
+            if (gameState.player.ammo <= 0) return;
+            
             const dx = gameState.player.lastDirection.x;
             const dy = gameState.player.lastDirection.y;
             
@@ -634,6 +741,19 @@
                     speed: 0.2,
                     lifetime: 2
                 });
+                
+                gameState.player.ammo--;
+                updateAmmoDisplay();
+            }
+        }
+        
+        // Покупка патронов
+        function buyAmmo() {
+            if (gameState.coinsCount >= 5) {
+                gameState.coinsCount -= 5;
+                gameState.player.ammo += 5;
+                updateCoinsDisplay();
+                updateAmmoDisplay();
             }
         }
         
@@ -650,8 +770,7 @@
         
         // Отрисовка игры
         function render() {
-            // Очистка canvas
-            ctx.fillStyle = '#2d5a2d'; // Зеленый фон
+            ctx.fillStyle = '#2d5a2d';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
             // Отрисовка лабиринта
@@ -679,6 +798,32 @@
                 ctx.fillText(HEALTH_CHAR, healthPack.x * CELL_SIZE + CELL_SIZE/2, healthPack.y * CELL_SIZE + CELL_SIZE/2);
             }
             
+            // Отрисовка патронов
+            for (const ammoPack of gameState.ammoPacks) {
+                ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+                ctx.fillRect(ammoPack.x * CELL_SIZE, ammoPack.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                
+                ctx.font = '16px Arial';
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(AMMO_CHAR, ammoPack.x * CELL_SIZE + CELL_SIZE/2, ammoPack.y * CELL_SIZE + CELL_SIZE/2);
+            }
+            
+            // Отрисовка монет
+            for (const coin of gameState.coins) {
+                ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+                ctx.beginPath();
+                ctx.arc(coin.x * CELL_SIZE + CELL_SIZE/2, coin.y * CELL_SIZE + CELL_SIZE/2, CELL_SIZE/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.font = '14px Arial';
+                ctx.fillStyle = 'black';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(COIN_CHAR, coin.x * CELL_SIZE + CELL_SIZE/2, coin.y * CELL_SIZE + CELL_SIZE/2);
+            }
+            
             // Отрисовка пуль
             for (const bullet of gameState.bullets) {
                 ctx.fillStyle = '#ffeb3b';
@@ -695,7 +840,6 @@
             
             // Отрисовка врагов
             for (const enemy of gameState.enemies) {
-                // Меняем цвет в зависимости от количества попаданий
                 const intensity = 1 - (enemy.hits / HITS_TO_KILL) * 0.5;
                 ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
                 
@@ -707,7 +851,6 @@
                 ctx.textBaseline = 'middle';
                 ctx.fillText(ENEMY_CHAR, enemy.x * CELL_SIZE + CELL_SIZE/2, enemy.y * CELL_SIZE + CELL_SIZE/2);
                 
-                // Отображаем количество попаданий
                 ctx.fillStyle = 'white';
                 ctx.font = '10px Arial';
                 ctx.fillText(`${enemy.hits}/${HITS_TO_KILL}`, enemy.x * CELL_SIZE + CELL_SIZE/2, enemy.y * CELL_SIZE + CELL_SIZE - 3);
@@ -741,11 +884,11 @@
                     gameState.lastEnemySpawn = 0;
                 }
                 
-                // Спавн здоровья
-                gameState.lastHealthSpawn += deltaTime;
-                if (gameState.lastHealthSpawn >= gameState.healthSpawnInterval) {
-                    spawnHealthPack();
-                    gameState.lastHealthSpawn = 0;
+                // Спавн патронов
+                gameState.lastAmmoSpawn += deltaTime;
+                if (gameState.lastAmmoSpawn >= gameState.ammoSpawnInterval) {
+                    spawnAmmoPack();
+                    gameState.lastAmmoSpawn = 0;
                 }
                 
                 // Движение врагов
@@ -754,8 +897,8 @@
                 // Движение пуль
                 moveBullets(deltaTime);
                 
-                // Проверка сбора здоровья
-                checkHealthCollection();
+                // Проверка сбора предметов
+                checkItemCollection();
                 
                 // Обновление статистики
                 updateStats();
@@ -771,10 +914,11 @@
         // Обновление статистики
         function updateStats() {
             scoreElement.textContent = gameState.score;
+            coinsElement.textContent = gameState.coinsCount;
             enemyCountElement.textContent = gameState.enemies.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
             nextEnemyElement.textContent = Math.ceil(gameState.enemySpawnInterval - gameState.lastEnemySpawn) + ' сек';
-            nextHealthElement.textContent = Math.ceil(gameState.healthSpawnInterval - gameState.lastHealthSpawn) + ' сек';
+            nextAmmoElement.textContent = Math.ceil(gameState.ammoSpawnInterval - gameState.lastAmmoSpawn) + ' сек';
         }
         
         // Обработка нажатий клавиш
@@ -819,6 +963,10 @@
                     e.preventDefault();
                     shoot();
                     break;
+                case 'm':
+                case 'M':
+                    shopElement.style.display = 'block';
+                    break;
             }
             
             if (moved) {
@@ -836,6 +984,7 @@
             gameState.isRunning = false;
             gameState.gameOver = true;
             finalScoreElement.textContent = gameState.score;
+            finalCoinsElement.textContent = gameState.coinsCount;
             finalTimeElement.textContent = Math.floor(gameState.survivalTime);
             gameOverElement.style.display = 'block';
         }
@@ -846,23 +995,30 @@
                 x: GRID_WIDTH / 2, 
                 y: GRID_HEIGHT / 2, 
                 health: MAX_HEALTH,
+                ammo: START_AMMO,
                 lastDirection: { x: 0, y: 1 }
             };
             gameState.enemies = [];
             gameState.bullets = [];
             gameState.healthPacks = [];
+            gameState.ammoPacks = [];
+            gameState.coins = [];
             gameState.maze = createMaze();
             gameState.lastEnemySpawn = 0;
-            gameState.lastHealthSpawn = 0;
+            gameState.lastAmmoSpawn = 0;
             gameState.survivalTime = 0;
             gameState.score = 0;
+            gameState.coinsCount = 0;
             gameState.gameOver = false;
             gameState.lastUpdate = 0;
             gameState.lastHitTime = 0;
             
             updateHealthDisplay();
+            updateAmmoDisplay();
+            updateCoinsDisplay();
             updateDirectionIndicator();
             gameOverElement.style.display = 'none';
+            shopElement.style.display = 'none';
             
             startGame();
         }
@@ -885,6 +1041,8 @@
         function init() {
             gameState.maze = createMaze();
             updateHealthDisplay();
+            updateAmmoDisplay();
+            updateCoinsDisplay();
             updateDirectionIndicator();
             
             // Назначение обработчиков событий
@@ -893,6 +1051,9 @@
             startButton.addEventListener('click', startGame);
             pauseButton.addEventListener('click', pauseGame);
             shootButton.addEventListener('click', shoot);
+            openShopButton.addEventListener('click', () => shopElement.style.display = 'block');
+            closeShopButton.addEventListener('click', () => shopElement.style.display = 'none');
+            buyAmmoButton.addEventListener('click', buyAmmo);
             
             // Назначение обработчиков для кнопок управления
             upButton.addEventListener('click', () => {
