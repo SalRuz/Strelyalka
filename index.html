@@ -207,6 +207,10 @@
                 <span>Следующий враг:</span>
                 <span id="nextEnemy" class="stat-value">10 сек</span>
             </div>
+            <div class="stat">
+                <span>Следующее здоровье:</span>
+                <span id="nextHealth" class="stat-value">30 сек</span>
+            </div>
         </div>
         
         <div class="game-container">
@@ -232,10 +236,8 @@
             
             <div class="control-group">
                 <h3>Действия</h3>
-                <button id="shootUpButton">Стрелять ↑</button>
-                <button id="shootLeftButton">Стрелять ←</button>
-                <button id="shootRightButton">Стрелять →</button>
-                <button id="shootDownButton">Стрелять ↓</button>
+                <button id="shootButton" class="shoot-btn">Стрелять</button>
+                <div>Направление: <span id="directionIndicator">↓</span></div>
             </div>
             
             <div class="control-group">
@@ -250,10 +252,10 @@
             <p>Управляйте персонажем <span style="color: #3498db; font-weight: bold">@</span> с помощью:</p>
             <p>- Клавиш <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> или стрелок</p>
             <p>- Кнопок на экране (для мобильных устройств)</p>
-            <p>- <span class="joystick-info">Джойстика</span> (если подключен)</p>
-            <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопок стрельбы или клавиш <span class="key">I</span><span class="key">J</span><span class="key">K</span><span class="key">L</span></p>
-            <p>Избегайте врагов - у вас 5 жизней!</p>
-            <p>Каждые 10 секунд появляется новый враг!</p>
+            <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопки стрельбы или клавиши <span class="key">SPACE</span></p>
+            <p>Направление стрельбы зависит от последнего движения</p>
+            <p>Каждые 30 секунд появляются дополнительные жизни <span style="color: #00ff00; font-weight: bold">+</span></p>
+            <p>Избегайте врагов - у вас 5 жизней! Враги действуют как стены.</p>
         </div>
     </div>
 
@@ -265,8 +267,10 @@
         const PLAYER_CHAR = '@';
         const ENEMY_CHAR = '&';
         const BULLET_CHAR = '*';
+        const HEALTH_CHAR = '+';
         const WALL_CHAR = '#';
         const MAX_HEALTH = 5;
+        const HITS_TO_KILL = 3;
         
         // Элементы DOM
         const canvas = document.getElementById('gameCanvas');
@@ -276,31 +280,38 @@
         const healthDisplayElement = document.getElementById('healthDisplay');
         const survivalTimeElement = document.getElementById('survivalTime');
         const nextEnemyElement = document.getElementById('nextEnemy');
+        const nextHealthElement = document.getElementById('nextHealth');
         const gameOverElement = document.getElementById('gameOver');
         const finalScoreElement = document.getElementById('finalScore');
         const finalTimeElement = document.getElementById('finalTime');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
+        const shootButton = document.getElementById('shootButton');
+        const directionIndicator = document.getElementById('directionIndicator');
         
         // Кнопки управления
         const upButton = document.getElementById('upButton');
         const leftButton = document.getElementById('leftButton');
         const downButton = document.getElementById('downButton');
         const rightButton = document.getElementById('rightButton');
-        const shootUpButton = document.getElementById('shootUpButton');
-        const shootLeftButton = document.getElementById('shootLeftButton');
-        const shootRightButton = document.getElementById('shootRightButton');
-        const shootDownButton = document.getElementById('shootDownButton');
         
         // Состояние игры
         let gameState = {
-            player: { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2, health: MAX_HEALTH },
+            player: { 
+                x: GRID_WIDTH / 2, 
+                y: GRID_HEIGHT / 2, 
+                health: MAX_HEALTH,
+                lastDirection: { x: 0, y: 1 } // Направление по умолчанию - вниз
+            },
             enemies: [],
             bullets: [],
+            healthPacks: [],
             maze: [],
             lastEnemySpawn: 0,
+            lastHealthSpawn: 0,
             enemySpawnInterval: 10,
+            healthSpawnInterval: 30,
             lastUpdate: 0,
             survivalTime: 0,
             score: 0,
@@ -370,11 +381,43 @@
             return maze;
         }
         
-        // Проверка возможности движения
-        function canMove(x, y) {
-            return x >= 0 && x < GRID_WIDTH && 
-                   y >= 0 && y < GRID_HEIGHT && 
-                   gameState.maze[y][x] === 0;
+        // Проверка возможности движения для игрока
+        function canPlayerMove(x, y) {
+            // Проверяем стены
+            if (x < 0 || x >= GRID_WIDTH || y < 0 || y >= GRID_HEIGHT || gameState.maze[y][x] === 1) {
+                return false;
+            }
+            
+            // Проверяем врагов (они действуют как стены)
+            for (const enemy of gameState.enemies) {
+                if (enemy.x === x && enemy.y === y) {
+                    return false;
+                }
+            }
+            
+            return true;
+        }
+        
+        // Проверка возможности движения для врагов
+        function canEnemyMove(x, y) {
+            // Проверяем стены
+            if (x < 0 || x >= GRID_WIDTH || y < 0 || y >= GRID_HEIGHT || gameState.maze[y][x] === 1) {
+                return false;
+            }
+            
+            // Проверяем игрока (враги не могут занимать ту же клетку)
+            if (gameState.player.x === x && gameState.player.y === y) {
+                return false;
+            }
+            
+            // Проверяем других врагов (они действуют как стены друг для друга)
+            for (const otherEnemy of gameState.enemies) {
+                if (otherEnemy.x === x && otherEnemy.y === y) {
+                    return false;
+                }
+            }
+            
+            return true;
         }
         
         // Спавн врага
@@ -386,7 +429,7 @@
                 x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
                 y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 attempts++;
-            } while ((!canMove(x, y) || 
+            } while ((!canEnemyMove(x, y) || 
                      Math.abs(x - gameState.player.x) < 8 || 
                      Math.abs(y - gameState.player.y) < 8) && 
                      attempts < 100);
@@ -397,17 +440,38 @@
                     y: y,
                     lastMove: 0,
                     path: [],
-                    pathUpdateTime: 0
+                    pathUpdateTime: 0,
+                    hits: 0 // Количество попаданий
+                });
+            }
+        }
+        
+        // Спавн здоровья
+        function spawnHealthPack() {
+            let x, y;
+            let attempts = 0;
+            
+            do {
+                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
+                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
+                attempts++;
+            } while ((gameState.maze[y][x] === 1 || 
+                     Math.abs(x - gameState.player.x) < 5 || 
+                     Math.abs(y - gameState.player.y) < 5) && 
+                     attempts < 100);
+            
+            if (attempts < 100) {
+                gameState.healthPacks.push({
+                    x: x,
+                    y: y
                 });
             }
         }
         
         // Поиск пути для врага (упрощенный алгоритм)
         function findPath(enemy, targetX, targetY) {
-            // Простой алгоритм движения к цели с обходом препятствий
             const directions = [
-                [0, -1], [1, 0], [0, 1], [-1, 0],  // Вверх, право, низ, лево
-                [1, -1], [1, 1], [-1, 1], [-1, -1] // Диагонали
+                [0, -1], [1, 0], [0, 1], [-1, 0]  // Вверх, право, низ, лево
             ];
             
             let bestDir = null;
@@ -417,7 +481,7 @@
                 const nx = enemy.x + dx;
                 const ny = enemy.y + dy;
                 
-                if (canMove(nx, ny)) {
+                if (canEnemyMove(nx, ny)) {
                     const dist = Math.abs(nx - targetX) + Math.abs(ny - targetY);
                     
                     if (dist < bestDist) {
@@ -455,7 +519,7 @@
                         const newX = enemy.x + dx;
                         const newY = enemy.y + dy;
                         
-                        if (canMove(newX, newY)) {
+                        if (canEnemyMove(newX, newY)) {
                             enemy.x = newX;
                             enemy.y = newY;
                         } else {
@@ -465,8 +529,7 @@
                     }
                     
                     // Проверка столкновения с игроком
-                    if (Math.abs(enemy.x - gameState.player.x) <= 1 && 
-                        Math.abs(enemy.y - gameState.player.y) <= 1) {
+                    if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
                         playerHit();
                     }
                 }
@@ -485,11 +548,15 @@
                 }
                 
                 // Двигаем пулю
-                bullet.x += bullet.dx;
-                bullet.y += bullet.dy;
+                bullet.x += bullet.dx * bullet.speed;
+                bullet.y += bullet.dy * bullet.speed;
                 
                 // Проверяем столкновение со стенами
-                if (!canMove(Math.floor(bullet.x), Math.floor(bullet.y))) {
+                const gridX = Math.floor(bullet.x);
+                const gridY = Math.floor(bullet.y);
+                
+                if (gridX < 0 || gridX >= GRID_WIDTH || gridY < 0 || gridY >= GRID_HEIGHT || 
+                    gameState.maze[gridY][gridX] === 1) {
                     gameState.bullets.splice(i, 1);
                     continue;
                 }
@@ -498,12 +565,33 @@
                 for (let j = gameState.enemies.length - 1; j >= 0; j--) {
                     const enemy = gameState.enemies[j];
                     
-                    if (Math.abs(bullet.x - enemy.x) < 0.5 && Math.abs(bullet.y - enemy.y) < 0.5) {
-                        gameState.enemies.splice(j, 1);
+                    if (Math.floor(bullet.x) === enemy.x && Math.floor(bullet.y) === enemy.y) {
+                        enemy.hits++;
+                        
+                        if (enemy.hits >= HITS_TO_KILL) {
+                            gameState.enemies.splice(j, 1);
+                            gameState.score += 10;
+                        }
+                        
                         gameState.bullets.splice(i, 1);
-                        gameState.score += 10;
                         break;
                     }
+                }
+            }
+        }
+        
+        // Проверка сбора здоровья
+        function checkHealthCollection() {
+            for (let i = gameState.healthPacks.length - 1; i >= 0; i--) {
+                const healthPack = gameState.healthPacks[i];
+                
+                if (healthPack.x === gameState.player.x && healthPack.y === gameState.player.y) {
+                    if (gameState.player.health < MAX_HEALTH) {
+                        gameState.player.health++;
+                        updateHealthDisplay();
+                    }
+                    gameState.healthPacks.splice(i, 1);
+                    break;
                 }
             }
         }
@@ -532,16 +620,32 @@
             healthDisplayElement.innerHTML = hearts;
         }
         
-        // Выстрел
-        function shoot(dx, dy) {
-            gameState.bullets.push({
-                x: gameState.player.x + 0.5,
-                y: gameState.player.y + 0.5,
-                dx: dx,
-                dy: dy,
-                speed: 0.2,
-                lifetime: 2
-            });
+        // Выстрел в последнем направлении движения
+        function shoot() {
+            const dx = gameState.player.lastDirection.x;
+            const dy = gameState.player.lastDirection.y;
+            
+            if (dx !== 0 || dy !== 0) {
+                gameState.bullets.push({
+                    x: gameState.player.x + 0.5,
+                    y: gameState.player.y + 0.5,
+                    dx: dx,
+                    dy: dy,
+                    speed: 0.2,
+                    lifetime: 2
+                });
+            }
+        }
+        
+        // Обновление индикатора направления
+        function updateDirectionIndicator() {
+            const dx = gameState.player.lastDirection.x;
+            const dy = gameState.player.lastDirection.y;
+            
+            if (dx === 0 && dy === -1) directionIndicator.textContent = '↑';
+            else if (dx === 1 && dy === 0) directionIndicator.textContent = '→';
+            else if (dx === 0 && dy === 1) directionIndicator.textContent = '↓';
+            else if (dx === -1 && dy === 0) directionIndicator.textContent = '←';
         }
         
         // Отрисовка игры
@@ -563,6 +667,18 @@
                 }
             }
             
+            // Отрисовка здоровья
+            for (const healthPack of gameState.healthPacks) {
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+                ctx.fillRect(healthPack.x * CELL_SIZE, healthPack.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+                
+                ctx.font = '16px Arial';
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(HEALTH_CHAR, healthPack.x * CELL_SIZE + CELL_SIZE/2, healthPack.y * CELL_SIZE + CELL_SIZE/2);
+            }
+            
             // Отрисовка пуль
             for (const bullet of gameState.bullets) {
                 ctx.fillStyle = '#ffeb3b';
@@ -579,7 +695,10 @@
             
             // Отрисовка врагов
             for (const enemy of gameState.enemies) {
-                ctx.fillStyle = '#e74c3c';
+                // Меняем цвет в зависимости от количества попаданий
+                const intensity = 1 - (enemy.hits / HITS_TO_KILL) * 0.5;
+                ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
+                
                 ctx.fillRect(enemy.x * CELL_SIZE, enemy.y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
                 
                 ctx.font = '16px Arial';
@@ -587,6 +706,11 @@
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
                 ctx.fillText(ENEMY_CHAR, enemy.x * CELL_SIZE + CELL_SIZE/2, enemy.y * CELL_SIZE + CELL_SIZE/2);
+                
+                // Отображаем количество попаданий
+                ctx.fillStyle = 'white';
+                ctx.font = '10px Arial';
+                ctx.fillText(`${enemy.hits}/${HITS_TO_KILL}`, enemy.x * CELL_SIZE + CELL_SIZE/2, enemy.y * CELL_SIZE + CELL_SIZE - 3);
             }
             
             // Отрисовка игрока
@@ -617,11 +741,21 @@
                     gameState.lastEnemySpawn = 0;
                 }
                 
+                // Спавн здоровья
+                gameState.lastHealthSpawn += deltaTime;
+                if (gameState.lastHealthSpawn >= gameState.healthSpawnInterval) {
+                    spawnHealthPack();
+                    gameState.lastHealthSpawn = 0;
+                }
+                
                 // Движение врагов
                 moveEnemies(deltaTime);
                 
                 // Движение пуль
                 moveBullets(deltaTime);
+                
+                // Проверка сбора здоровья
+                checkHealthCollection();
                 
                 // Обновление статистики
                 updateStats();
@@ -640,6 +774,7 @@
             enemyCountElement.textContent = gameState.enemies.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
             nextEnemyElement.textContent = Math.ceil(gameState.enemySpawnInterval - gameState.lastEnemySpawn) + ' сек';
+            nextHealthElement.textContent = Math.ceil(gameState.healthSpawnInterval - gameState.lastHealthSpawn) + ' сек';
         }
         
         // Обработка нажатий клавиш
@@ -648,49 +783,51 @@
             
             let newX = gameState.player.x;
             let newY = gameState.player.y;
+            let moved = false;
             
             switch(e.key) {
                 case 'ArrowUp':
                 case 'w':
                 case 'W':
                     newY--;
+                    gameState.player.lastDirection = { x: 0, y: -1 };
+                    moved = true;
                     break;
                 case 'ArrowDown':
                 case 's':
                 case 'S':
                     newY++;
+                    gameState.player.lastDirection = { x: 0, y: 1 };
+                    moved = true;
                     break;
                 case 'ArrowLeft':
                 case 'a':
                 case 'A':
                     newX--;
+                    gameState.player.lastDirection = { x: -1, y: 0 };
+                    moved = true;
                     break;
                 case 'ArrowRight':
                 case 'd':
                 case 'D':
                     newX++;
+                    gameState.player.lastDirection = { x: 1, y: 0 };
+                    moved = true;
                     break;
-                case 'i':
-                case 'I':
-                    shoot(0, -1);
-                    break;
-                case 'j':
-                case 'J':
-                    shoot(-1, 0);
-                    break;
-                case 'k':
-                case 'K':
-                    shoot(0, 1);
-                    break;
-                case 'l':
-                case 'L':
-                    shoot(1, 0);
+                case ' ':
+                case 'Spacebar':
+                    e.preventDefault();
+                    shoot();
                     break;
             }
             
-            if (canMove(newX, newY)) {
-                gameState.player.x = newX;
-                gameState.player.y = newY;
+            if (moved) {
+                updateDirectionIndicator();
+                
+                if (canPlayerMove(newX, newY)) {
+                    gameState.player.x = newX;
+                    gameState.player.y = newY;
+                }
             }
         }
         
@@ -705,11 +842,18 @@
         
         // Перезапуск игры
         function restartGame() {
-            gameState.player = { x: GRID_WIDTH / 2, y: GRID_HEIGHT / 2, health: MAX_HEALTH };
+            gameState.player = { 
+                x: GRID_WIDTH / 2, 
+                y: GRID_HEIGHT / 2, 
+                health: MAX_HEALTH,
+                lastDirection: { x: 0, y: 1 }
+            };
             gameState.enemies = [];
             gameState.bullets = [];
+            gameState.healthPacks = [];
             gameState.maze = createMaze();
             gameState.lastEnemySpawn = 0;
+            gameState.lastHealthSpawn = 0;
             gameState.survivalTime = 0;
             gameState.score = 0;
             gameState.gameOver = false;
@@ -717,6 +861,7 @@
             gameState.lastHitTime = 0;
             
             updateHealthDisplay();
+            updateDirectionIndicator();
             gameOverElement.style.display = 'none';
             
             startGame();
@@ -740,43 +885,47 @@
         function init() {
             gameState.maze = createMaze();
             updateHealthDisplay();
+            updateDirectionIndicator();
             
             // Назначение обработчиков событий
             window.addEventListener('keydown', handleKeyDown);
             restartButton.addEventListener('click', restartGame);
             startButton.addEventListener('click', startGame);
             pauseButton.addEventListener('click', pauseGame);
+            shootButton.addEventListener('click', shoot);
             
             // Назначение обработчиков для кнопок управления
             upButton.addEventListener('click', () => {
-                if (canMove(gameState.player.x, gameState.player.y - 1)) {
+                gameState.player.lastDirection = { x: 0, y: -1 };
+                updateDirectionIndicator();
+                if (canPlayerMove(gameState.player.x, gameState.player.y - 1)) {
                     gameState.player.y--;
                 }
             });
             
             downButton.addEventListener('click', () => {
-                if (canMove(gameState.player.x, gameState.player.y + 1)) {
+                gameState.player.lastDirection = { x: 0, y: 1 };
+                updateDirectionIndicator();
+                if (canPlayerMove(gameState.player.x, gameState.player.y + 1)) {
                     gameState.player.y++;
                 }
             });
             
             leftButton.addEventListener('click', () => {
-                if (canMove(gameState.player.x - 1, gameState.player.y)) {
+                gameState.player.lastDirection = { x: -1, y: 0 };
+                updateDirectionIndicator();
+                if (canPlayerMove(gameState.player.x - 1, gameState.player.y)) {
                     gameState.player.x--;
                 }
             });
             
             rightButton.addEventListener('click', () => {
-                if (canMove(gameState.player.x + 1, gameState.player.y)) {
+                gameState.player.lastDirection = { x: 1, y: 0 };
+                updateDirectionIndicator();
+                if (canPlayerMove(gameState.player.x + 1, gameState.player.y)) {
                     gameState.player.x++;
                 }
             });
-            
-            // Кнопки стрельбы
-            shootUpButton.addEventListener('click', () => shoot(0, -1));
-            shootDownButton.addEventListener('click', () => shoot(0, 1));
-            shootLeftButton.addEventListener('click', () => shoot(-1, 0));
-            shootRightButton.addEventListener('click', () => shoot(1, 0));
             
             // Первоначальная отрисовка
             render();
