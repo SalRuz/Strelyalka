@@ -3,8 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Лабиринт с врагами</title>
+    <title>SalRuzO Strike</title>
     <style>
+        * {
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: #FFD700 #333;
+        }
+        
+        *::-webkit-scrollbar {
+            width: 12px;
+        }
+        
+        *::-webkit-scrollbar-track {
+            background: #333;
+            border-radius: 6px;
+        }
+        
+        *::-webkit-scrollbar-thumb {
+            background: #FFD700;
+            border-radius: 6px;
+            border: 2px solid #333;
+        }
+        
+        *::-webkit-scrollbar-thumb:hover {
+            background: #FFA500;
+        }
+        
         body {
             margin: 0;
             padding: 20px;
@@ -15,7 +40,7 @@
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            overflow: hidden;
+            overflow-x: hidden;
         }
         
         .container {
@@ -25,6 +50,8 @@
             padding: 20px;
             border-radius: 15px;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+            max-height: 95vh;
+            overflow-y: auto;
         }
         
         h1 {
@@ -60,6 +87,8 @@
             padding: 10px 15px;
             border-radius: 8px;
             min-width: 200px;
+            max-height: 300px;
+            overflow-y: auto;
         }
         
         button {
@@ -113,12 +142,14 @@
             padding: 10px;
             border-radius: 8px;
             flex-wrap: wrap;
+            overflow-x: auto;
         }
         
         .stat {
             display: flex;
             flex-direction: column;
             margin: 5px 10px;
+            min-width: 100px;
         }
         
         .stat-value {
@@ -129,6 +160,8 @@
         .health {
             display: flex;
             gap: 5px;
+            flex-wrap: wrap;
+            justify-content: center;
         }
         
         .heart {
@@ -142,11 +175,18 @@
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
+            max-height: 200px;
+            overflow-y: auto;
         }
         
         .instructions h3 {
             color: #ffcc00;
             margin-top: 0;
+            position: sticky;
+            top: 0;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 5px;
+            border-radius: 5px;
         }
         
         .key {
@@ -171,50 +211,86 @@
             display: none;
             z-index: 100;
             border: 3px solid #ff0000;
+            max-width: 90%;
+            max-height: 80%;
+            overflow-y: auto;
         }
         
         .shop {
             position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(0, 0, 0, 0.9);
-            padding: 15px;
-            border-radius: 10px;
-            border: 2px solid #FFD700;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            padding: 20px;
+            border-radius: 15px;
+            border: 3px solid #FFD700;
             display: none;
             z-index: 100;
-            max-width: 300px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 80%;
+            overflow-y: auto;
         }
         
         .shop h3 {
             color: #FFD700;
             margin-top: 0;
             text-align: center;
+            position: sticky;
+            top: 0;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 10px;
+            border-radius: 5px;
         }
         
         .shop-item {
-            margin: 10px 0;
-            padding: 8px;
+            margin: 15px 0;
+            padding: 12px;
             background: rgba(50, 50, 50, 0.7);
-            border-radius: 5px;
+            border-radius: 8px;
+            border-left: 4px solid #FFD700;
         }
         
         .weapon-info {
             display: flex;
             align-items: center;
             gap: 10px;
-            margin: 5px 0;
+            margin: 8px 0;
         }
         
         .weapon-icon {
+            font-size: 24px;
+            width: 40px;
+            text-align: center;
+        }
+        
+        .shop-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .enemy-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 5px 0;
+            padding: 5px;
+            background: rgba(100, 0, 0, 0.3);
+            border-radius: 5px;
+        }
+        
+        .enemy-icon {
             font-size: 20px;
             width: 30px;
             text-align: center;
         }
         
-        .joystick-info {
-            color: #4fc3f7;
-            font-weight: bold;
+        .ghost {
+            color: #aabbcc;
+            text-shadow: 0 0 5px #00ffff;
         }
         
         @media (max-width: 1000px) {
@@ -243,11 +319,8 @@
             }
             
             .shop {
-                position: relative;
-                top: 0;
-                right: 0;
-                margin: 10px auto;
-                max-width: 90%;
+                width: 95%;
+                padding: 15px;
             }
         }
     </style>
@@ -272,6 +345,10 @@
             <div class="stat">
                 <span>Врагов:</span>
                 <span id="enemyCount" class="stat-value">0</span>
+            </div>
+            <div class="stat">
+                <span>Призраков:</span>
+                <span id="ghostCount" class="stat-value">0</span>
             </div>
             <div class="stat">
                 <span>Жизни:</span>
@@ -300,37 +377,52 @@
             </div>
             
             <div id="shop" class="shop">
-                <h3>Магазин</h3>
+                <h3>🎪 Магазин улучшений</h3>
                 
                 <div class="shop-item">
-                    <p>5 патронов - 5 монет</p>
-                    <button id="buyAmmoButton" class="buy-btn">Купить патроны</button>
+                    <p>🎯 5 патронов - 5 монет</p>
+                    <div class="shop-buttons">
+                        <button id="buyAmmoButton" class="buy-btn">Купить патроны</button>
+                    </div>
                 </div>
                 
                 <div class="shop-item">
-                    <p>Доп. жизнь - 10 монет</p>
-                    <button id="buyHealthButton" class="buy-btn">Купить жизнь</button>
+                    <p>❤️ Доп. жизнь - 10 монет</p>
+                    <div class="shop-buttons">
+                        <button id="buyHealthButton" class="buy-btn">Купить жизнь</button>
+                    </div>
                 </div>
                 
                 <div class="shop-item">
-                    <p>Улучшенное оружие - 30 монет</p>
+                    <p>🔫 Улучшенное оружие - 30 монет</p>
                     <div class="weapon-info">
-                        <span class="weapon-icon">🔫</span>
+                        <span class="weapon-icon">⚡</span>
                         <span>Убивает за 2 выстрела</span>
                     </div>
-                    <button id="buyWeapon2Button" class="weapon-btn">Купить</button>
+                    <div class="shop-buttons">
+                        <button id="buyWeapon2Button" class="weapon-btn">Купить</button>
+                    </div>
                 </div>
                 
                 <div class="shop-item">
-                    <p>Мощное оружие - 50 монет</p>
+                    <p>💥 Мощное оружие - 50 монет</p>
                     <div class="weapon-info">
-                        <span class="weapon-icon">💥</span>
+                        <span class="weapon-icon">🔥</span>
                         <span>Убивает за 1 выстрел</span>
                     </div>
-                    <button id="buyWeapon3Button" class="weapon-btn">Купить</button>
+                    <div class="shop-buttons">
+                        <button id="buyWeapon3Button" class="weapon-btn">Купить</button>
+                    </div>
                 </div>
                 
-                <button id="closeShopButton">Закрыть магазин</button>
+                <div class="enemy-info">
+                    <span class="enemy-icon">👻</span>
+                    <span>Призрак появляется каждые 20 сек и проходит сквозь стены!</span>
+                </div>
+                
+                <div class="shop-buttons">
+                    <button id="closeShopButton">Закрыть магазин (M)</button>
+                </div>
             </div>
         </div>
         
@@ -345,7 +437,7 @@
             
             <div class="control-group">
                 <h3>Действия</h3>
-                <button id="shootButton" class="shoot-btn">Стрелять</button>
+                <button id="shootButton" class="shoot-btn">Стрелять (Пробел)</button>
                 <button id="openShopButton" class="buy-btn">Магазин (M)</button>
                 <div>Направление: <span id="directionIndicator">↓</span></div>
             </div>
@@ -358,27 +450,29 @@
         </div>
         
         <div class="instructions">
-            <h3>Как играть:</h3>
+            <h3>📖 Как играть:</h3>
             <p>Управляйте персонажем <span style="color: #3498db; font-weight: bold">@</span> с помощью:</p>
             <p>- Клавиш <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> или стрелок</p>
             <p>- Кнопок на экране (для мобильных устройств)</p>
             <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопки стрельбы или клавиши <span class="key">SPACE</span></p>
             <p>Направление стрельбы зависит от последнего движения</p>
             <p>Собирайте патроны <span style="color: #FFD700; font-weight: bold">♦</span>, монеты <span style="color: #FFD700; font-weight: bold">$</span> и жизни <span style="color: #00ff00; font-weight: bold">+</span></p>
+            <p>Остерегайтесь призраков <span style="color: #aabbcc; font-weight: bold; text-shadow: 0 0 5px #00ffff;">👻</span> - они проходят сквозь стены!</p>
             <p>Покупайте улучшения в магазине (кнопка Магазин или клавиша <span class="key">M</span>)</p>
-            <p>Избегайте врагов - у вас 5 жизней! Враги действуют как стены.</p>
+            <p>Избегайте врагов - у вас 5 жизней!</p>
         </div>
     </div>
 
     <script>
         // Константы и настройки игры
         const CELL_SIZE = 20;
-        const GRID_WIDTH = 80;  // Увеличено в 4 раза
-        const GRID_HEIGHT = 60; // Увеличено в 4 раза
+        const GRID_WIDTH = 80;
+        const GRID_HEIGHT = 60;
         const VIEWPORT_WIDTH = 40;
         const VIEWPORT_HEIGHT = 30;
         const PLAYER_CHAR = '@';
         const ENEMY_CHAR = '&';
+        const GHOST_CHAR = '👻';
         const BULLET_CHAR = '*';
         const HEALTH_CHAR = '+';
         const AMMO_CHAR = '♦';
@@ -394,6 +488,12 @@
             POWERFUL: { damage: 3, hitsRequired: 1, cost: 50, name: "Мощное" }
         };
         
+        // Типы врагов
+        const ENEMY_TYPES = {
+            NORMAL: 'normal',
+            GHOST: 'ghost'
+        };
+        
         // Элементы DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
@@ -401,13 +501,14 @@
         const coinsElement = document.getElementById('coins');
         const ammoElement = document.getElementById('ammo');
         const enemyCountElement = document.getElementById('enemyCount');
+        const ghostCountElement = document.getElementById('ghostCount');
         const healthDisplayElement = document.getElementById('healthDisplay');
         const weaponElement = document.getElementById('weapon');
         const survivalTimeElement = document.getElementById('survivalTime');
         const gameOverElement = document.getElementById('gameOver');
         const finalScoreElement = document.getElementById('finalScore');
         const finalCoinsElement = document.getElementById('finalCoins');
-        finalTimeElement = document.getElementById('finalTime');
+        const finalTimeElement = document.getElementById('finalTime');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
@@ -444,9 +545,11 @@
             coins: [],
             maze: [],
             lastEnemySpawn: 0,
+            lastGhostSpawn: 0,
             lastAmmoSpawn: 0,
             lastHealthSpawn: 0,
             enemySpawnInterval: 10,
+            ghostSpawnInterval: 20,
             ammoSpawnInterval: 30,
             healthSpawnInterval: 60,
             lastUpdate: 0,
@@ -457,7 +560,8 @@
             gameOver: false,
             lastHitTime: 0,
             hitCooldown: 1,
-            camera: { x: 0, y: 0 }
+            camera: { x: 0, y: 0 },
+            shopOpen: false
         };
         
         // Обновление позиции камеры
@@ -480,15 +584,6 @@
         
         function toScreenY(mapY) {
             return (mapY - gameState.camera.y) * CELL_SIZE;
-        }
-        
-        // Преобразование координат экрана в координаты карты
-        function toMapX(screenX) {
-            return Math.floor(screenX / CELL_SIZE + gameState.camera.x);
-        }
-        
-        function toMapY(screenY) {
-            return Math.floor(screenY / CELL_SIZE + gameState.camera.y);
         }
         
         // Создание лабиринта
@@ -549,7 +644,7 @@
         }
         
         // Поиск пути (упрощенный алгоритм A*)
-        function findPath(startX, startY, targetX, targetY) {
+        function findPath(startX, startY, targetX, targetY, canPassWalls = false) {
             const openSet = [{x: startX, y: startY, g: 0, h: Math.abs(targetX - startX) + Math.abs(targetY - startY)}];
             const closedSet = new Set();
             const cameFrom = {};
@@ -585,8 +680,14 @@
                     const ny = current.y + dy;
                     const neighborKey = getKey(nx, ny);
                     
-                    if (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || 
-                        gameState.maze[ny][nx] === 1 || closedSet.has(neighborKey)) {
+                    // Призраки могут проходить сквозь стены
+                    if (!canPassWalls && (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || 
+                        gameState.maze[ny][nx] === 1 || closedSet.has(neighborKey))) {
+                        continue;
+                    }
+                    
+                    // Для призраков проверяем только границы карты
+                    if (canPassWalls && (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || closedSet.has(neighborKey))) {
                         continue;
                     }
                     
@@ -627,7 +728,7 @@
             return true;
         }
         
-        // Спавн врага
+        // Спавн обычного врага
         function spawnEnemy() {
             let x, y;
             let attempts = 0;
@@ -645,10 +746,39 @@
                 gameState.enemies.push({
                     x: x,
                     y: y,
+                    type: ENEMY_TYPES.NORMAL,
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
                     hits: 0
+                });
+            }
+        }
+        
+        // Спавн призрака
+        function spawnGhost() {
+            let x, y;
+            let attempts = 0;
+            
+            do {
+                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
+                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
+                attempts++;
+            } while (Math.abs(x - gameState.player.x) < 10 || 
+                     Math.abs(y - gameState.player.y) < 10) && 
+                     attempts < 50;
+            
+            if (attempts < 50) {
+                gameState.enemies.push({
+                    x: x,
+                    y: y,
+                    type: ENEMY_TYPES.GHOST,
+                    lastMove: 0,
+                    path: [],
+                    pathUpdateTime: 0,
+                    hits: 0,
+                    alpha: 0.7,
+                    pulse: 0
                 });
             }
         }
@@ -703,12 +833,17 @@
                 enemy.lastMove += deltaTime;
                 enemy.pathUpdateTime += deltaTime;
                 
-                if (enemy.lastMove >= 0.5) {
+                if (enemy.type === ENEMY_TYPES.GHOST) {
+                    enemy.pulse += deltaTime * 2;
+                    enemy.alpha = 0.6 + Math.sin(enemy.pulse) * 0.2;
+                }
+                
+                if (enemy.lastMove >= (enemy.type === ENEMY_TYPES.GHOST ? 0.3 : 0.5)) {
                     enemy.lastMove = 0;
                     
                     if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
                         enemy.pathUpdateTime = 0;
-                        enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y);
+                        enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y, enemy.type === ENEMY_TYPES.GHOST);
                     }
                     
                     if (enemy.path && enemy.path.length > 1) {
@@ -756,8 +891,8 @@
                         
                         if (enemy.hits >= gameState.player.weapon.hitsRequired) {
                             gameState.enemies.splice(j, 1);
-                            gameState.score += 10;
-                            gameState.coinsCount += 1;
+                            gameState.score += (enemy.type === ENEMY_TYPES.GHOST ? 20 : 10);
+                            gameState.coinsCount += (enemy.type === ENEMY_TYPES.GHOST ? 2 : 1);
                             gameState.coins.push({
                                 x: enemy.x,
                                 y: enemy.y
@@ -842,6 +977,14 @@
             weaponElement.textContent = `${gameState.player.weapon.name} (${gameState.player.weapon.hitsRequired})`;
         }
         
+        function updateEnemyCounts() {
+            const normalEnemies = gameState.enemies.filter(e => e.type === ENEMY_TYPES.NORMAL).length;
+            const ghosts = gameState.enemies.filter(e => e.type === ENEMY_TYPES.GHOST).length;
+            
+            enemyCountElement.textContent = normalEnemies;
+            ghostCountElement.textContent = ghosts;
+        }
+        
         // Выстрел
         function shoot() {
             if (gameState.player.ammo <= 0) return;
@@ -861,6 +1004,20 @@
                 
                 gameState.player.ammo--;
                 updateAmmoDisplay();
+            }
+        }
+        
+        // Открытие/закрытие магазина
+        function toggleShop() {
+            gameState.shopOpen = !gameState.shopOpen;
+            shopElement.style.display = gameState.shopOpen ? 'block' : 'none';
+            
+            if (gameState.shopOpen) {
+                gameState.isRunning = false;
+            } else if (!gameState.gameOver) {
+                gameState.isRunning = true;
+                gameState.lastUpdate = 0;
+                requestAnimationFrame(update);
             }
         }
         
@@ -995,19 +1152,33 @@
             for (const enemy of gameState.enemies) {
                 if (enemy.x >= startX && enemy.x < endX && enemy.y >= startY && enemy.y < endY) {
                     const intensity = 1 - (enemy.hits / gameState.player.weapon.hitsRequired) * 0.5;
-                    ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
+                    
+                    if (enemy.type === ENEMY_TYPES.GHOST) {
+                        ctx.globalAlpha = enemy.alpha;
+                        ctx.fillStyle = `rgba(170, 187, 204, ${intensity})`;
+                    } else {
+                        ctx.globalAlpha = 1;
+                        ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
+                    }
                     
                     ctx.fillRect(toScreenX(enemy.x), toScreenY(enemy.y), CELL_SIZE, CELL_SIZE);
                     
-                    ctx.font = '16px Arial';
+                    ctx.font = enemy.type === ENEMY_TYPES.GHOST ? '20px Arial' : '16px Arial';
                     ctx.fillStyle = 'white';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(ENEMY_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
+                    
+                    if (enemy.type === ENEMY_TYPES.GHOST) {
+                        ctx.fillText(GHOST_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
+                    } else {
+                        ctx.fillText(ENEMY_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
+                    }
                     
                     ctx.fillStyle = 'white';
                     ctx.font = '10px Arial';
                     ctx.fillText(`${enemy.hits}/${gameState.player.weapon.hitsRequired}`, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE - 3);
+                    
+                    ctx.globalAlpha = 1;
                 }
             }
             
@@ -1029,7 +1200,7 @@
             const deltaTime = (timestamp - gameState.lastUpdate) / 1000;
             gameState.lastUpdate = timestamp;
             
-            if (gameState.isRunning && !gameState.gameOver) {
+            if (gameState.isRunning && !gameState.gameOver && !gameState.shopOpen) {
                 gameState.survivalTime += deltaTime;
                 
                 // Спавн врагов
@@ -1037,6 +1208,13 @@
                 if (gameState.lastEnemySpawn >= gameState.enemySpawnInterval) {
                     spawnEnemy();
                     gameState.lastEnemySpawn = 0;
+                }
+                
+                // Спавн призраков
+                gameState.lastGhostSpawn += deltaTime;
+                if (gameState.lastGhostSpawn >= gameState.ghostSpawnInterval) {
+                    spawnGhost();
+                    gameState.lastGhostSpawn = 0;
                 }
                 
                 // Спавн патронов
@@ -1071,7 +1249,7 @@
             
             render();
             
-            if (gameState.isRunning && !gameState.gameOver) {
+            if (gameState.isRunning && !gameState.gameOver && !gameState.shopOpen) {
                 requestAnimationFrame(update);
             }
         }
@@ -1080,13 +1258,23 @@
         function updateStats() {
             scoreElement.textContent = gameState.score;
             coinsElement.textContent = gameState.coinsCount;
-            enemyCountElement.textContent = gameState.enemies.length;
+            updateEnemyCounts();
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
         }
         
         // Обработка нажатий клавиш
         function handleKeyDown(e) {
             if (gameState.gameOver) return;
+            
+            // Открытие/закрытие магазина по клавише M
+            if (e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь') {
+                e.preventDefault();
+                toggleShop();
+                return;
+            }
+            
+            // Если магазин открыт, игнорируем остальные клавиши
+            if (gameState.shopOpen) return;
             
             let newX = gameState.player.x;
             let newY = gameState.player.y;
@@ -1125,10 +1313,6 @@
                 case 'Spacebar':
                     e.preventDefault();
                     shoot();
-                    break;
-                case 'm':
-                case 'M':
-                    shopElement.style.display = 'block';
                     break;
             }
             
@@ -1169,6 +1353,7 @@
             gameState.coins = [];
             gameState.maze = createMaze();
             gameState.lastEnemySpawn = 0;
+            gameState.lastGhostSpawn = 0;
             gameState.lastAmmoSpawn = 0;
             gameState.lastHealthSpawn = 0;
             gameState.survivalTime = 0;
@@ -1178,6 +1363,7 @@
             gameState.lastUpdate = 0;
             gameState.lastHitTime = 0;
             gameState.camera = { x: 0, y: 0 };
+            gameState.shopOpen = false;
             
             updateHealthDisplay();
             updateAmmoDisplay();
@@ -1219,8 +1405,8 @@
             startButton.addEventListener('click', startGame);
             pauseButton.addEventListener('click', pauseGame);
             shootButton.addEventListener('click', shoot);
-            openShopButton.addEventListener('click', () => shopElement.style.display = 'block');
-            closeShopButton.addEventListener('click', () => shopElement.style.display = 'none');
+            openShopButton.addEventListener('click', toggleShop);
+            closeShopButton.addEventListener('click', toggleShop);
             buyAmmoButton.addEventListener('click', buyAmmo);
             buyHealthButton.addEventListener('click', buyHealth);
             buyWeapon2Button.addEventListener('click', () => buyWeapon(WEAPON_TYPES.IMPROVED));
