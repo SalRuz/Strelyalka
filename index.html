@@ -1,1 +1,204 @@
-0
+import pygame
+import random
+import time
+from pygame.locals import *
+
+# Инициализация Pygame
+pygame.init()
+
+# Настройки экрана
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Лабиринт с врагами")
+
+# Цвета
+GREEN = (0, 128, 0)
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+BLUE = (0, 0, 255)
+
+# Размер клетки и карты
+CELL_SIZE = 20
+GRID_WIDTH = WIDTH // CELL_SIZE
+GRID_HEIGHT = HEIGHT // CELL_SIZE
+
+# Игрок
+player_char = '@'
+player_pos = [GRID_WIDTH // 2, GRID_HEIGHT // 2]
+player_speed = 0.1
+player_last_move = time.time()
+
+# Враги
+enemies = []
+enemy_char = '&'
+enemy_spawn_time = 10  # секунд
+last_enemy_spawn = time.time()
+enemy_speed = 0.05
+
+# Создание лабиринта (упрощенная версия)
+def create_maze():
+    maze = [[0 for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
+    
+    # Границы
+    for i in range(GRID_WIDTH):
+        maze[0][i] = 1
+        maze[GRID_HEIGHT-1][i] = 1
+    
+    for i in range(GRID_HEIGHT):
+        maze[i][0] = 1
+        maze[i][GRID_WIDTH-1] = 1
+    
+    # Случайные стены внутри
+    for _ in range(GRID_WIDTH * GRID_HEIGHT // 5):  # Примерно 20% клеток - стены
+        x = random.randint(2, GRID_WIDTH-3)
+        y = random.randint(2, GRID_HEIGHT-3)
+        maze[y][x] = 1
+        
+        # Создаем небольшие коридоры
+        for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < GRID_WIDTH and 0 <= ny < GRID_HEIGHT:
+                maze[ny][nx] = 1 if random.random() < 0.3 else 0
+    
+    # Гарантируем, что начальная позиция игрока свободна
+    maze[player_pos[1]][player_pos[0]] = 0
+    maze[player_pos[1]-1][player_pos[0]] = 0
+    maze[player_pos[1]+1][player_pos[0]] = 0
+    maze[player_pos[1]][player_pos[0]-1] = 0
+    maze[player_pos[1]][player_pos[0]+1] = 0
+    
+    return maze
+
+# Создаем лабиринт
+maze = create_maze()
+
+# Джойстик
+joysticks = []
+if pygame.joystick.get_count() > 0:
+    joystick = pygame.joystick.Joystick(0)
+    joystick.init()
+    joysticks.append(joystick)
+    print(f"Джойстик подключен: {joystick.get_name()}")
+
+# Функция для проверки возможности движения
+def can_move(x, y):
+    return (0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT and 
+            maze[y][x] == 0)
+
+# Функция для спавна врага
+def spawn_enemy():
+    while True:
+        x = random.randint(1, GRID_WIDTH-2)
+        y = random.randint(1, GRID_HEIGHT-2)
+        
+        # Проверяем, что позиция свободна и не слишком близко к игроку
+        if (maze[y][x] == 0 and 
+            abs(x - player_pos[0]) > 5 and 
+            abs(y - player_pos[1]) > 5):
+            enemies.append([x, y, time.time()])  # x, y, последнее время движения
+            break
+
+# Основной игровой цикл
+running = True
+clock = pygame.time.Clock()
+
+while running:
+    current_time = time.time()
+    
+    # Обработка событий
+    for event in pygame.event.get():
+        if event.type == QUIT:
+            running = False
+        elif event.type == KEYDOWN:
+            if event.key == K_ESCAPE:
+                running = False
+    
+    # Управление с клавиатуры (на случай отсутствия джойстика)
+    keys = pygame.key.get_pressed()
+    new_x, new_y = player_pos[0], player_pos[1]
+    
+    if keys[K_LEFT] or keys[K_a]:
+        new_x -= 1
+    if keys[K_RIGHT] or keys[K_d]:
+        new_x += 1
+    if keys[K_UP] or keys[K_w]:
+        new_y -= 1
+    if keys[K_DOWN] or keys[K_s]:
+        new_y += 1
+    
+    # Управление с джойстика
+    if joysticks:
+        joystick = joysticks[0]
+        
+        # Ось джойстика (обычно левый стик)
+        x_axis = joystick.get_axis(0)
+        y_axis = joystick.get_axis(1)
+        
+        # Определяем направление с учетом мертвой зоны
+        deadzone = 0.5
+        if abs(x_axis) > deadzone:
+            new_x += 1 if x_axis > 0 else -1
+        if abs(y_axis) > deadzone:
+            new_y += 1 if y_axis > 0 else -1
+    
+    # Движение игрока с ограничением скорости
+    if current_time - player_last_move >= player_speed:
+        if can_move(new_x, player_pos[1]):
+            player_pos[0] = new_x
+        if can_move(player_pos[0], new_y):
+            player_pos[1] = new_y
+        
+        player_last_move = current_time
+    
+    # Спавн врагов
+    if current_time - last_enemy_spawn >= enemy_spawn_time:
+        spawn_enemy()
+        last_enemy_spawn = current_time
+    
+    # Движение врагов
+    for enemy in enemies:
+        if current_time - enemy[2] >= enemy_speed:
+            # Простой ИИ: двигаемся к игроку
+            dx = 1 if player_pos[0] > enemy[0] else -1 if player_pos[0] < enemy[0] else 0
+            dy = 1 if player_pos[1] > enemy[1] else -1 if player_pos[1] < enemy[1] else 0
+            
+            # Пробуем двигаться по горизонтали или вертикали
+            if dx != 0 and can_move(enemy[0] + dx, enemy[1]):
+                enemy[0] += dx
+            elif dy != 0 and can_move(enemy[0], enemy[1] + dy):
+                enemy[1] += dy
+            
+            enemy[2] = current_time  # Обновляем время последнего движения
+    
+    # Проверка столкновения с врагами
+    for enemy in enemies[:]:
+        if enemy[0] == player_pos[0] and enemy[1] == player_pos[1]:
+            print("Игра окончена! Враг поймал вас!")
+            running = False
+    
+    # Отрисовка
+    screen.fill(GREEN)  # Зеленый фон
+    
+    # Рисуем лабиринт
+    for y in range(GRID_HEIGHT):
+        for x in range(GRID_WIDTH):
+            if maze[y][x] == 1:  # Стена
+                pygame.draw.rect(screen, BLACK, (x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE))
+    
+    # Рисуем игрока
+    pygame.draw.rect(screen, BLUE, (player_pos[0] * CELL_SIZE, player_pos[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE))
+    font = pygame.font.SysFont(None, 24)
+    text = font.render(player_char, True, WHITE)
+    screen.blit(text, (player_pos[0] * CELL_SIZE + 5, player_pos[1] * CELL_SIZE + 2))
+    
+    # Рисуем врагов
+    for enemy in enemies:
+        pygame.draw.rect(screen, RED, (enemy[0] * CELL_SIZE, enemy[1] * CELL_SIZE, CELL_SIZE, CELL_SIZE))
+        text = font.render(enemy_char, True, WHITE)
+        screen.blit(text, (enemy[0] * CELL_SIZE + 5, enemy[1] * CELL_SIZE + 2))
+    
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
