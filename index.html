@@ -416,6 +416,7 @@
         const CLEANER_CHAR = 'C';
         const MEDIC_CHAR = 'M';
         const MINE_CHAR = 'X';
+        const DOOR_CHAR = 'D';
         const MAX_HEALTH = 5;
         const START_AMMO = 5;
 
@@ -487,6 +488,7 @@
             coins: [],
             mines: [],
             maze: [],
+            doors: [],
             lastEnemySpawn: 0,
             lastArmoredEnemySpawn: 0,
             lastSpeedsterSpawn: 0,
@@ -547,6 +549,7 @@
         // Создание лабиринта с домами и дорожками
         function createMaze() {
             const maze = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
+            const doors = [];
 
             // Границы
             for (let i = 0; i < GRID_WIDTH; i++) {
@@ -559,7 +562,7 @@
             }
 
             // Создаём дома
-            for (let i = 0; i < 15; i++) {
+            for (let i = 0; i < 25; i++) {
                 const houseWidth = 4 + Math.floor(Math.random() * 4);
                 const houseHeight = 4 + Math.floor(Math.random() * 4);
                 const x = 3 + Math.floor(Math.random() * (GRID_WIDTH - houseWidth - 6));
@@ -573,6 +576,30 @@
                         }
                     }
                 }
+
+                // Добавляем дверной проем
+                const doorSide = Math.floor(Math.random() * 4);
+                let doorX, doorY;
+                switch(doorSide) {
+                    case 0: // Верхняя сторона
+                        doorX = x + 1 + Math.floor(Math.random() * (houseWidth - 2));
+                        doorY = y;
+                        break;
+                    case 1: // Правая сторона
+                        doorX = x + houseWidth - 1;
+                        doorY = y + 1 + Math.floor(Math.random() * (houseHeight - 2));
+                        break;
+                    case 2: // Нижняя сторона
+                        doorX = x + 1 + Math.floor(Math.random() * (houseWidth - 2));
+                        doorY = y + houseHeight - 1;
+                        break;
+                    case 3: // Левая сторона
+                        doorX = x;
+                        doorY = y + 1 + Math.floor(Math.random() * (houseHeight - 2));
+                        break;
+                }
+                maze[doorY][doorX] = 2; // Дверной проем
+                doors.push({x: doorX, y: doorY});
             }
 
             // Гарантируем, что игрок может двигаться
@@ -586,6 +613,7 @@
                 }
             }
 
+            gameState.doors = doors;
             return maze;
         }
 
@@ -883,21 +911,37 @@
             }
         }
 
-        // Спавн бойца
+        // Спавн бойца внутри дома
         function spawnFighter() {
-            let x, y;
+            if (gameState.doors.length === 0) return;
+
+            const randomDoorIndex = Math.floor(Math.random() * gameState.doors.length);
+            const door = gameState.doors[randomDoorIndex];
+            let x = door.x;
+            let y = door.y;
+
+            // Найти пустую клетку внутри дома
+            let houseCenterX = x;
+            let houseCenterY = y;
+            let houseWidth = 4 + Math.floor(Math.random() * 4);
+            let houseHeight = 4 + Math.floor(Math.random() * 4);
+
+            // Попробуем найти пустую клетку внутри дома
             let attempts = 0;
+            let found = false;
+            for (let ry = y - 2; ry < y + 2 && !found; ry++) {
+                for (let rx = x - 2; rx < x + 2 && !found; rx++) {
+                    if (gameState.maze[ry] && gameState.maze[ry][rx] === 0) {
+                        x = rx;
+                        y = ry;
+                        found = true;
+                    }
+                    attempts++;
+                    if (attempts > 20) break;
+                }
+            }
 
-            do {
-                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
-                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
-                attempts++;
-            } while ((gameState.maze[y][x] === 1 ||
-                     Math.abs(x - gameState.player.x) < 10 ||
-                     Math.abs(y - gameState.player.y) < 10) &&
-                     attempts < 100);
-
-            if (attempts < 100) {
+            if (found) {
                 gameState.fighters.push({
                     x: x,
                     y: y,
@@ -912,48 +956,68 @@
             }
         }
 
-        // Спавн уборщика
+        // Спавн уборщика внутри дома
         function spawnCleaner() {
-            let x, y;
+            if (gameState.doors.length === 0) return;
+
+            const randomDoorIndex = Math.floor(Math.random() * gameState.doors.length);
+            const door = gameState.doors[randomDoorIndex];
+            let x = door.x;
+            let y = door.y;
+
+            // Найти пустую клетку внутри дома
             let attempts = 0;
+            let found = false;
+            for (let ry = y - 2; ry < y + 2 && !found; ry++) {
+                for (let rx = x - 2; rx < x + 2 && !found; rx++) {
+                    if (gameState.maze[ry] && gameState.maze[ry][rx] === 0) {
+                        x = rx;
+                        y = ry;
+                        found = true;
+                    }
+                    attempts++;
+                    if (attempts > 20) break;
+                }
+            }
 
-            do {
-                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
-                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
-                attempts++;
-            } while ((gameState.maze[y][x] === 1 ||
-                     Math.abs(x - gameState.player.x) < 10 ||
-                     Math.abs(y - gameState.player.y) < 10) &&
-                     attempts < 100);
-
-            if (attempts < 100) {
+            if (found) {
                 gameState.cleaners.push({
                     x: x,
                     y: y,
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
-                    health: 5, // Изменено с 10 на 5
+                    health: 5,
                     targetMine: null
                 });
             }
         }
 
-        // Спавн медика
+        // Спавн медика внутри дома
         function spawnMedic() {
-            let x, y;
+            if (gameState.doors.length === 0) return;
+
+            const randomDoorIndex = Math.floor(Math.random() * gameState.doors.length);
+            const door = gameState.doors[randomDoorIndex];
+            let x = door.x;
+            let y = door.y;
+
+            // Найти пустую клетку внутри дома
             let attempts = 0;
+            let found = false;
+            for (let ry = y - 2; ry < y + 2 && !found; ry++) {
+                for (let rx = x - 2; rx < x + 2 && !found; rx++) {
+                    if (gameState.maze[ry] && gameState.maze[ry][rx] === 0) {
+                        x = rx;
+                        y = ry;
+                        found = true;
+                    }
+                    attempts++;
+                    if (attempts > 20) break;
+                }
+            }
 
-            do {
-                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
-                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
-                attempts++;
-            } while ((gameState.maze[y][x] === 1 ||
-                     Math.abs(x - gameState.player.x) < 10 ||
-                     Math.abs(y - gameState.player.y) < 10) &&
-                     attempts < 100);
-
-            if (attempts < 100) {
+            if (found) {
                 gameState.medics.push({
                     x: x,
                     y: y,
@@ -967,21 +1031,31 @@
             }
         }
 
-        // Спавн патронов
+        // Спавн патронов внутри дома
         function spawnAmmoPack() {
-            let x, y;
+            if (gameState.doors.length === 0) return;
+
+            const randomDoorIndex = Math.floor(Math.random() * gameState.doors.length);
+            const door = gameState.doors[randomDoorIndex];
+            let x = door.x;
+            let y = door.y;
+
+            // Найти пустую клетку внутри дома
             let attempts = 0;
+            let found = false;
+            for (let ry = y - 2; ry < y + 2 && !found; ry++) {
+                for (let rx = x - 2; rx < x + 2 && !found; rx++) {
+                    if (gameState.maze[ry] && gameState.maze[ry][rx] === 0) {
+                        x = rx;
+                        y = ry;
+                        found = true;
+                    }
+                    attempts++;
+                    if (attempts > 20) break;
+                }
+            }
 
-            do {
-                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
-                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
-                attempts++;
-            } while ((gameState.maze[y][x] === 1 ||
-                     Math.abs(x - gameState.player.x) < 10 ||
-                     Math.abs(y - gameState.player.y) < 10) &&
-                     attempts < 100);
-
-            if (attempts < 100) {
+            if (found) {
                 gameState.ammoPacks.push({
                     x: x,
                     y: y
@@ -989,21 +1063,31 @@
             }
         }
 
-        // Спавн здоровья
+        // Спавн здоровья внутри дома
         function spawnHealthPack() {
-            let x, y;
+            if (gameState.doors.length === 0) return;
+
+            const randomDoorIndex = Math.floor(Math.random() * gameState.doors.length);
+            const door = gameState.doors[randomDoorIndex];
+            let x = door.x;
+            let y = door.y;
+
+            // Найти пустую клетку внутри дома
             let attempts = 0;
+            let found = false;
+            for (let ry = y - 2; ry < y + 2 && !found; ry++) {
+                for (let rx = x - 2; rx < x + 2 && !found; rx++) {
+                    if (gameState.maze[ry] && gameState.maze[ry][rx] === 0) {
+                        x = rx;
+                        y = ry;
+                        found = true;
+                    }
+                    attempts++;
+                    if (attempts > 20) break;
+                }
+            }
 
-            do {
-                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
-                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
-                attempts++;
-            } while ((gameState.maze[y][x] === 1 ||
-                     Math.abs(x - gameState.player.x) < 10 ||
-                     Math.abs(y - gameState.player.y) < 10) &&
-                     attempts < 100);
-
-            if (attempts < 100) {
+            if (found) {
                 gameState.healthPacks.push({
                     x: x,
                     y: y
@@ -1796,6 +1880,11 @@
                         ctx.fillRect(toScreenX(x), toScreenY(y), CELL_SIZE, CELL_SIZE);
                         ctx.strokeStyle = '#2c3e50';
                         ctx.strokeRect(toScreenX(x), toScreenY(y), CELL_SIZE, CELL_SIZE);
+                    } else if (gameState.maze[y][x] === 2) {
+                        ctx.fillStyle = '#8B4513'; // Цвет двери
+                        ctx.fillRect(toScreenX(x), toScreenY(y), CELL_SIZE, CELL_SIZE);
+                        ctx.fillStyle = '#D2B48C'; // Цвет дверного проема
+                        ctx.fillRect(toScreenX(x) + 2, toScreenY(y) + 2, CELL_SIZE - 4, CELL_SIZE - 4);
                     }
                 }
             }
