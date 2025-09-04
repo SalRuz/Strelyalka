@@ -5,31 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Лабиринт с врагами</title>
     <style>
-        * {
-            box-sizing: border-box;
-            scrollbar-width: thin;
-            scrollbar-color: #FFD700 #333;
-        }
-        
-        *::-webkit-scrollbar {
-            width: 12px;
-        }
-        
-        *::-webkit-scrollbar-track {
-            background: #333;
-            border-radius: 6px;
-        }
-        
-        *::-webkit-scrollbar-thumb {
-            background: #FFD700;
-            border-radius: 6px;
-            border: 2px solid #333;
-        }
-        
-        *::-webkit-scrollbar-thumb:hover {
-            background: #FFA500;
-        }
-        
         body {
             margin: 0;
             padding: 20px;
@@ -40,7 +15,7 @@
             flex-direction: column;
             align-items: center;
             min-height: 100vh;
-            overflow-x: hidden;
+            overflow: hidden;
         }
         
         .container {
@@ -50,8 +25,6 @@
             padding: 20px;
             border-radius: 15px;
             box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-            max-height: 95vh;
-            overflow-y: auto;
         }
         
         h1 {
@@ -87,8 +60,6 @@
             padding: 10px 15px;
             border-radius: 8px;
             min-width: 200px;
-            max-height: 300px;
-            overflow-y: auto;
         }
         
         button {
@@ -142,14 +113,12 @@
             padding: 10px;
             border-radius: 8px;
             flex-wrap: wrap;
-            overflow-x: auto;
         }
         
         .stat {
             display: flex;
             flex-direction: column;
             margin: 5px 10px;
-            min-width: 100px;
         }
         
         .stat-value {
@@ -160,8 +129,6 @@
         .health {
             display: flex;
             gap: 5px;
-            flex-wrap: wrap;
-            justify-content: center;
         }
         
         .heart {
@@ -175,18 +142,11 @@
             padding: 15px;
             border-radius: 8px;
             margin: 15px 0;
-            max-height: 200px;
-            overflow-y: auto;
         }
         
         .instructions h3 {
             color: #ffcc00;
             margin-top: 0;
-            position: sticky;
-            top: 0;
-            background: rgba(0, 0, 0, 0.8);
-            padding: 5px;
-            border-radius: 5px;
         }
         
         .key {
@@ -211,86 +171,92 @@
             display: none;
             z-index: 100;
             border: 3px solid #ff0000;
-            max-width: 90%;
-            max-height: 80%;
-            overflow-y: auto;
         }
         
         .shop {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95);
-            padding: 20px;
-            border-radius: 15px;
-            border: 3px solid #FFD700;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #FFD700;
             display: none;
             z-index: 100;
-            width: 90%;
-            max-width: 500px;
-            max-height: 80%;
-            overflow-y: auto;
+            max-width: 300px;
         }
         
         .shop h3 {
             color: #FFD700;
             margin-top: 0;
             text-align: center;
-            position: sticky;
-            top: 0;
-            background: rgba(0, 0, 0, 0.9);
-            padding: 10px;
-            border-radius: 5px;
         }
         
         .shop-item {
-            margin: 15px 0;
-            padding: 12px;
+            margin: 10px 0;
+            padding: 8px;
             background: rgba(50, 50, 50, 0.7);
-            border-radius: 8px;
-            border-left: 4px solid #FFD700;
+            border-radius: 5px;
         }
         
         .weapon-info {
             display: flex;
             align-items: center;
             gap: 10px;
-            margin: 8px 0;
+            margin: 5px 0;
         }
         
         .weapon-icon {
-            font-size: 24px;
-            width: 40px;
-            text-align: center;
-        }
-        
-        .shop-buttons {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        
-        .enemy-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin: 5px 0;
-            padding: 5px;
-            background: rgba(100, 0, 0, 0.3);
-            border-radius: 5px;
-        }
-        
-        .enemy-icon {
             font-size: 20px;
             width: 30px;
             text-align: center;
         }
         
-        .ghost {
-            color: #aabbcc;
-            text-shadow: 0 0 5px #00ffff;
+        .joystick-info {
+            color: #4fc3f7;
+            font-weight: bold;
+        }
+        
+        .slider-container {
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            width: 100%;
+            max-width: 300px;
+        }
+        
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 10px;
+            border-radius: 5px;
+            background: #333;
+            outline: none;
+        }
+        
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
+        }
+        
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #4CAF50;
+            cursor: pointer;
         }
         
         @media (max-width: 1000px) {
@@ -319,8 +285,11 @@
             }
             
             .shop {
-                width: 95%;
-                padding: 15px;
+                position: relative;
+                top: 0;
+                right: 0;
+                margin: 10px auto;
+                max-width: 90%;
             }
         }
     </style>
@@ -345,10 +314,6 @@
             <div class="stat">
                 <span>Врагов:</span>
                 <span id="enemyCount" class="stat-value">0</span>
-            </div>
-            <div class="stat">
-                <span>Призраков:</span>
-                <span id="ghostCount" class="stat-value">0</span>
             </div>
             <div class="stat">
                 <span>Жизни:</span>
@@ -377,52 +342,37 @@
             </div>
             
             <div id="shop" class="shop">
-                <h3>🎪 Магазин улучшений</h3>
+                <h3>Магазин</h3>
                 
                 <div class="shop-item">
-                    <p>🎯 5 патронов - 5 монет</p>
-                    <div class="shop-buttons">
-                        <button id="buyAmmoButton" class="buy-btn">Купить патроны</button>
-                    </div>
+                    <p>5 патронов - 5 монет</p>
+                    <button id="buyAmmoButton" class="buy-btn">Купить патроны</button>
                 </div>
                 
                 <div class="shop-item">
-                    <p>❤️ Доп. жизнь - 10 монет</p>
-                    <div class="shop-buttons">
-                        <button id="buyHealthButton" class="buy-btn">Купить жизнь</button>
-                    </div>
+                    <p>Доп. жизнь - 10 монет</p>
+                    <button id="buyHealthButton" class="buy-btn">Купить жизнь</button>
                 </div>
                 
                 <div class="shop-item">
-                    <p>🔫 Улучшенное оружие - 30 монет</p>
+                    <p>Улучшенное оружие - 30 монет</p>
                     <div class="weapon-info">
-                        <span class="weapon-icon">⚡</span>
+                        <span class="weapon-icon">🔫</span>
                         <span>Убивает за 2 выстрела</span>
                     </div>
-                    <div class="shop-buttons">
-                        <button id="buyWeapon2Button" class="weapon-btn">Купить</button>
-                    </div>
+                    <button id="buyWeapon2Button" class="weapon-btn">Купить</button>
                 </div>
                 
                 <div class="shop-item">
-                    <p>💥 Мощное оружие - 50 монет</p>
+                    <p>Мощное оружие - 50 монет</p>
                     <div class="weapon-info">
-                        <span class="weapon-icon">🔥</span>
+                        <span class="weapon-icon">💥</span>
                         <span>Убивает за 1 выстрел</span>
                     </div>
-                    <div class="shop-buttons">
-                        <button id="buyWeapon3Button" class="weapon-btn">Купить</button>
-                    </div>
+                    <button id="buyWeapon3Button" class="weapon-btn">Купить</button>
                 </div>
                 
-                <div class="enemy-info">
-                    <span class="enemy-icon">👻</span>
-                    <span>Призрак появляется каждые 20 сек и проходит сквозь стены!</span>
-                </div>
-                
-                <div class="shop-buttons">
-                    <button id="closeShopButton">Закрыть магазин (M)</button>
-                </div>
+                <button id="closeShopButton">Закрыть магазин</button>
             </div>
         </div>
         
@@ -437,7 +387,7 @@
             
             <div class="control-group">
                 <h3>Действия</h3>
-                <button id="shootButton" class="shoot-btn">Стрелять (Пробел)</button>
+                <button id="shootButton" class="shoot-btn">Стрелять</button>
                 <button id="openShopButton" class="buy-btn">Магазин (M)</button>
                 <div>Направление: <span id="directionIndicator">↓</span></div>
             </div>
@@ -449,30 +399,38 @@
             </div>
         </div>
         
+        <div class="slider-container">
+            <div class="slider-label">
+                <span>Громкость звуков:</span>
+                <span id="volumeValue">50%</span>
+            </div>
+            <input type="range" min="0" max="100" value="50" class="slider" id="volumeSlider">
+        </div>
+        
         <div class="instructions">
-            <h3>📖 Как играть:</h3>
+            <h3>Как играть:</h3>
             <p>Управляйте персонажем <span style="color: #3498db; font-weight: bold">@</span> с помощью:</p>
             <p>- Клавиш <span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span> или стрелок</p>
             <p>- Кнопок на экране (для мобильных устройств)</p>
             <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопки стрельбы или клавиши <span class="key">SPACE</span></p>
             <p>Направление стрельбы зависит от последнего движения</p>
             <p>Собирайте патроны <span style="color: #FFD700; font-weight: bold">♦</span>, монеты <span style="color: #FFD700; font-weight: bold">$</span> и жизни <span style="color: #00ff00; font-weight: bold">+</span></p>
-            <p>Остерегайтесь призраков <span style="color: #aabbcc; font-weight: bold; text-shadow: 0 0 5px #00ffff;">👻</span> - они проходят сквозь стены!</p>
             <p>Покупайте улучшения в магазине (кнопка Магазин или клавиша <span class="key">M</span>)</p>
-            <p>Избегайте врагов - у вас 5 жизней!</p>
+            <p>Избегайте врагов - у вас 5 жизней! Враги действуют как стены.</p>
+            <p>Остерегайтесь призраков <span style="color: #9b59b6; font-weight: bold">Ø</span> - они проходят сквозь стены и дают 2 монеты!</p>
         </div>
     </div>
 
     <script>
         // Константы и настройки игры
         const CELL_SIZE = 20;
-        const GRID_WIDTH = 80;
-        const GRID_HEIGHT = 60;
+        const GRID_WIDTH = 80;  // Увеличено в 4 раза
+        const GRID_HEIGHT = 60; // Увеличено в 4 раза
         const VIEWPORT_WIDTH = 40;
         const VIEWPORT_HEIGHT = 30;
         const PLAYER_CHAR = '@';
         const ENEMY_CHAR = '&';
-        const GHOST_CHAR = '👻';
+        const GHOST_CHAR = 'Ø';
         const BULLET_CHAR = '*';
         const HEALTH_CHAR = '+';
         const AMMO_CHAR = '♦';
@@ -488,12 +446,6 @@
             POWERFUL: { damage: 3, hitsRequired: 1, cost: 50, name: "Мощное" }
         };
         
-        // Типы врагов
-        const ENEMY_TYPES = {
-            NORMAL: 'normal',
-            GHOST: 'ghost'
-        };
-        
         // Элементы DOM
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
@@ -501,14 +453,13 @@
         const coinsElement = document.getElementById('coins');
         const ammoElement = document.getElementById('ammo');
         const enemyCountElement = document.getElementById('enemyCount');
-        const ghostCountElement = document.getElementById('ghostCount');
         const healthDisplayElement = document.getElementById('healthDisplay');
         const weaponElement = document.getElementById('weapon');
         const survivalTimeElement = document.getElementById('survivalTime');
         const gameOverElement = document.getElementById('gameOver');
         const finalScoreElement = document.getElementById('finalScore');
         const finalCoinsElement = document.getElementById('finalCoins');
-        const finalTimeElement = document.getElementById('finalTime');
+        finalTimeElement = document.getElementById('finalTime');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
@@ -521,6 +472,8 @@
         const closeShopButton = document.getElementById('closeShopButton');
         const shopElement = document.getElementById('shop');
         const directionIndicator = document.getElementById('directionIndicator');
+        const volumeSlider = document.getElementById('volumeSlider');
+        const volumeValue = document.getElementById('volumeValue');
         
         // Кнопки управления
         const upButton = document.getElementById('upButton');
@@ -539,6 +492,7 @@
                 weapon: WEAPON_TYPES.NORMAL
             },
             enemies: [],
+            ghosts: [],
             bullets: [],
             healthPacks: [],
             ammoPacks: [],
@@ -584,6 +538,15 @@
         
         function toScreenY(mapY) {
             return (mapY - gameState.camera.y) * CELL_SIZE;
+        }
+        
+        // Преобразование координат экрана в координаты карты
+        function toMapX(screenX) {
+            return Math.floor(screenX / CELL_SIZE + gameState.camera.x);
+        }
+        
+        function toMapY(screenY) {
+            return Math.floor(screenY / CELL_SIZE + gameState.camera.y);
         }
         
         // Создание лабиринта
@@ -644,7 +607,7 @@
         }
         
         // Поиск пути (упрощенный алгоритм A*)
-        function findPath(startX, startY, targetX, targetY, canPassWalls = false) {
+        function findPath(startX, startY, targetX, targetY) {
             const openSet = [{x: startX, y: startY, g: 0, h: Math.abs(targetX - startX) + Math.abs(targetY - startY)}];
             const closedSet = new Set();
             const cameFrom = {};
@@ -680,14 +643,8 @@
                     const ny = current.y + dy;
                     const neighborKey = getKey(nx, ny);
                     
-                    // Призраки могут проходить сквозь стены
-                    if (!canPassWalls && (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || 
-                        gameState.maze[ny][nx] === 1 || closedSet.has(neighborKey))) {
-                        continue;
-                    }
-                    
-                    // Для призраков проверяем только границы карты
-                    if (canPassWalls && (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || closedSet.has(neighborKey))) {
+                    if (nx < 0 || nx >= GRID_WIDTH || ny < 0 || ny >= GRID_HEIGHT || 
+                        gameState.maze[ny][nx] === 1 || closedSet.has(neighborKey)) {
                         continue;
                     }
                     
@@ -725,10 +682,16 @@
                 }
             }
             
+            for (const ghost of gameState.ghosts) {
+                if (ghost.x === x && ghost.y === y) {
+                    return false;
+                }
+            }
+            
             return true;
         }
         
-        // Спавн обычного врага
+        // Спавн врага
         function spawnEnemy() {
             let x, y;
             let attempts = 0;
@@ -746,7 +709,6 @@
                 gameState.enemies.push({
                     x: x,
                     y: y,
-                    type: ENEMY_TYPES.NORMAL,
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
@@ -765,20 +727,17 @@
                 y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
                 attempts++;
             } while (Math.abs(x - gameState.player.x) < 10 || 
-                     Math.abs(y - gameState.player.y) < 10) && 
-                     attempts < 50;
+                     Math.abs(y - gameState.player.y) < 10 && 
+                     attempts < 100);
             
-            if (attempts < 50) {
-                gameState.enemies.push({
+            if (attempts < 100) {
+                gameState.ghosts.push({
                     x: x,
                     y: y,
-                    type: ENEMY_TYPES.GHOST,
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
-                    hits: 0,
-                    alpha: 0.7,
-                    pulse: 0
+                    hits: 0
                 });
             }
         }
@@ -833,17 +792,12 @@
                 enemy.lastMove += deltaTime;
                 enemy.pathUpdateTime += deltaTime;
                 
-                if (enemy.type === ENEMY_TYPES.GHOST) {
-                    enemy.pulse += deltaTime * 2;
-                    enemy.alpha = 0.6 + Math.sin(enemy.pulse) * 0.2;
-                }
-                
-                if (enemy.lastMove >= (enemy.type === ENEMY_TYPES.GHOST ? 0.3 : 0.5)) {
+                if (enemy.lastMove >= 0.5) {
                     enemy.lastMove = 0;
                     
                     if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
                         enemy.pathUpdateTime = 0;
-                        enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y, enemy.type === ENEMY_TYPES.GHOST);
+                        enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y);
                     }
                     
                     if (enemy.path && enemy.path.length > 1) {
@@ -854,6 +808,34 @@
                     }
                     
                     if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
+                        playerHit();
+                    }
+                }
+            }
+        }
+        
+        // Движение призраков (могут проходить сквозь стены)
+        function moveGhosts(deltaTime) {
+            for (const ghost of gameState.ghosts) {
+                ghost.lastMove += deltaTime;
+                ghost.pathUpdateTime += deltaTime;
+                
+                if (ghost.lastMove >= 0.4) { // Призраки немного быстрее
+                    ghost.lastMove = 0;
+                    
+                    if (ghost.pathUpdateTime >= 3 || ghost.path.length === 0) {
+                        ghost.pathUpdateTime = 0;
+                        
+                        // Призраки игнорируют стены при поиске пути
+                        const dx = Math.sign(gameState.player.x - ghost.x);
+                        const dy = Math.sign(gameState.player.y - ghost.y);
+                        
+                        // Простое движение к игроку
+                        ghost.x += dx;
+                        ghost.y += dy;
+                    }
+                    
+                    if (ghost.x === gameState.player.x && ghost.y === gameState.player.y) {
                         playerHit();
                     }
                 }
@@ -883,6 +865,7 @@
                     continue;
                 }
                 
+                // Проверка попадания во врагов
                 for (let j = gameState.enemies.length - 1; j >= 0; j--) {
                     const enemy = gameState.enemies[j];
                     
@@ -891,11 +874,33 @@
                         
                         if (enemy.hits >= gameState.player.weapon.hitsRequired) {
                             gameState.enemies.splice(j, 1);
-                            gameState.score += (enemy.type === ENEMY_TYPES.GHOST ? 20 : 10);
-                            gameState.coinsCount += (enemy.type === ENEMY_TYPES.GHOST ? 2 : 1);
+                            gameState.score += 10;
+                            gameState.coinsCount += 1;
                             gameState.coins.push({
                                 x: enemy.x,
                                 y: enemy.y
+                            });
+                        }
+                        
+                        gameState.bullets.splice(i, 1);
+                        break;
+                    }
+                }
+                
+                // Проверка попадания в призраков
+                for (let j = gameState.ghosts.length - 1; j >= 0; j--) {
+                    const ghost = gameState.ghosts[j];
+                    
+                    if (Math.floor(bullet.x) === ghost.x && Math.floor(bullet.y) === ghost.y) {
+                        ghost.hits += gameState.player.weapon.damage;
+                        
+                        if (ghost.hits >= gameState.player.weapon.hitsRequired) {
+                            gameState.ghosts.splice(j, 1);
+                            gameState.score += 20; // Двойные очки за призрака
+                            gameState.coinsCount += 2; // Двойные монеты за призрака
+                            gameState.coins.push({
+                                x: ghost.x,
+                                y: ghost.y
                             });
                         }
                         
@@ -977,14 +982,6 @@
             weaponElement.textContent = `${gameState.player.weapon.name} (${gameState.player.weapon.hitsRequired})`;
         }
         
-        function updateEnemyCounts() {
-            const normalEnemies = gameState.enemies.filter(e => e.type === ENEMY_TYPES.NORMAL).length;
-            const ghosts = gameState.enemies.filter(e => e.type === ENEMY_TYPES.GHOST).length;
-            
-            enemyCountElement.textContent = normalEnemies;
-            ghostCountElement.textContent = ghosts;
-        }
-        
         // Выстрел
         function shoot() {
             if (gameState.player.ammo <= 0) return;
@@ -1004,20 +1001,6 @@
                 
                 gameState.player.ammo--;
                 updateAmmoDisplay();
-            }
-        }
-        
-        // Открытие/закрытие магазина
-        function toggleShop() {
-            gameState.shopOpen = !gameState.shopOpen;
-            shopElement.style.display = gameState.shopOpen ? 'block' : 'none';
-            
-            if (gameState.shopOpen) {
-                gameState.isRunning = false;
-            } else if (!gameState.gameOver) {
-                gameState.isRunning = true;
-                gameState.lastUpdate = 0;
-                requestAnimationFrame(update);
             }
         }
         
@@ -1060,6 +1043,12 @@
             else if (dx === 1 && dy === 0) directionIndicator.textContent = '→';
             else if (dx === 0 && dy === 1) directionIndicator.textContent = '↓';
             else if (dx === -1 && dy === 0) directionIndicator.textContent = '←';
+        }
+        
+        // Переключение магазина
+        function toggleShop() {
+            gameState.shopOpen = !gameState.shopOpen;
+            shopElement.style.display = gameState.shopOpen ? 'block' : 'none';
         }
         
         // Отрисовка игры
@@ -1152,33 +1141,39 @@
             for (const enemy of gameState.enemies) {
                 if (enemy.x >= startX && enemy.x < endX && enemy.y >= startY && enemy.y < endY) {
                     const intensity = 1 - (enemy.hits / gameState.player.weapon.hitsRequired) * 0.5;
-                    
-                    if (enemy.type === ENEMY_TYPES.GHOST) {
-                        ctx.globalAlpha = enemy.alpha;
-                        ctx.fillStyle = `rgba(170, 187, 204, ${intensity})`;
-                    } else {
-                        ctx.globalAlpha = 1;
-                        ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
-                    }
+                    ctx.fillStyle = `rgb(${Math.floor(231 * intensity)}, ${Math.floor(76 * intensity)}, ${Math.floor(60 * intensity)})`;
                     
                     ctx.fillRect(toScreenX(enemy.x), toScreenY(enemy.y), CELL_SIZE, CELL_SIZE);
                     
-                    ctx.font = enemy.type === ENEMY_TYPES.GHOST ? '20px Arial' : '16px Arial';
+                    ctx.font = '16px Arial';
                     ctx.fillStyle = 'white';
                     ctx.textAlign = 'center';
                     ctx.textBaseline = 'middle';
-                    
-                    if (enemy.type === ENEMY_TYPES.GHOST) {
-                        ctx.fillText(GHOST_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
-                    } else {
-                        ctx.fillText(ENEMY_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
-                    }
+                    ctx.fillText(ENEMY_CHAR, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE/2);
                     
                     ctx.fillStyle = 'white';
                     ctx.font = '10px Arial';
                     ctx.fillText(`${enemy.hits}/${gameState.player.weapon.hitsRequired}`, toScreenX(enemy.x) + CELL_SIZE/2, toScreenY(enemy.y) + CELL_SIZE - 3);
+                }
+            }
+            
+            // Отрисовка призраков
+            for (const ghost of gameState.ghosts) {
+                if (ghost.x >= startX && ghost.x < endX && ghost.y >= startY && ghost.y < endY) {
+                    const intensity = 1 - (ghost.hits / gameState.player.weapon.hitsRequired) * 0.5;
+                    ctx.fillStyle = `rgba(${Math.floor(155 * intensity)}, ${Math.floor(89 * intensity)}, ${Math.floor(182 * intensity)}, 0.7)`;
                     
-                    ctx.globalAlpha = 1;
+                    ctx.fillRect(toScreenX(ghost.x), toScreenY(ghost.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(GHOST_CHAR, toScreenX(ghost.x) + CELL_SIZE/2, toScreenY(ghost.y) + CELL_SIZE/2);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(`${ghost.hits}/${gameState.player.weapon.hitsRequired}`, toScreenX(ghost.x) + CELL_SIZE/2, toScreenY(ghost.y) + CELL_SIZE - 3);
                 }
             }
             
@@ -1200,7 +1195,7 @@
             const deltaTime = (timestamp - gameState.lastUpdate) / 1000;
             gameState.lastUpdate = timestamp;
             
-            if (gameState.isRunning && !gameState.gameOver && !gameState.shopOpen) {
+            if (gameState.isRunning && !gameState.gameOver) {
                 gameState.survivalTime += deltaTime;
                 
                 // Спавн врагов
@@ -1234,6 +1229,9 @@
                 // Движение врагов
                 moveEnemies(deltaTime);
                 
+                // Движение призраков
+                moveGhosts(deltaTime);
+                
                 // Движение пуль
                 moveBullets(deltaTime);
                 
@@ -1249,7 +1247,7 @@
             
             render();
             
-            if (gameState.isRunning && !gameState.gameOver && !gameState.shopOpen) {
+            if (gameState.isRunning && !gameState.gameOver) {
                 requestAnimationFrame(update);
             }
         }
@@ -1258,23 +1256,13 @@
         function updateStats() {
             scoreElement.textContent = gameState.score;
             coinsElement.textContent = gameState.coinsCount;
-            updateEnemyCounts();
+            enemyCountElement.textContent = gameState.enemies.length + gameState.ghosts.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
         }
         
         // Обработка нажатий клавиш
         function handleKeyDown(e) {
             if (gameState.gameOver) return;
-            
-            // Открытие/закрытие магазина по клавише M
-            if (e.key === 'm' || e.key === 'M' || e.key === 'ь' || e.key === 'Ь') {
-                e.preventDefault();
-                toggleShop();
-                return;
-            }
-            
-            // Если магазин открыт, игнорируем остальные клавиши
-            if (gameState.shopOpen) return;
             
             let newX = gameState.player.x;
             let newY = gameState.player.y;
@@ -1314,6 +1302,10 @@
                     e.preventDefault();
                     shoot();
                     break;
+                case 'm':
+                case 'M':
+                    toggleShop();
+                    break;
             }
             
             if (moved) {
@@ -1347,6 +1339,7 @@
                 weapon: WEAPON_TYPES.NORMAL
             };
             gameState.enemies = [];
+            gameState.ghosts = [];
             gameState.bullets = [];
             gameState.healthPacks = [];
             gameState.ammoPacks = [];
@@ -1412,6 +1405,12 @@
             buyWeapon2Button.addEventListener('click', () => buyWeapon(WEAPON_TYPES.IMPROVED));
             buyWeapon3Button.addEventListener('click', () => buyWeapon(WEAPON_TYPES.POWERFUL));
             
+            // Обработчик ползунка громкости
+            volumeSlider.addEventListener('input', function() {
+                volumeValue.textContent = this.value + '%';
+                // Здесь можно добавить изменение громкости звуков игры
+            });
+            
             // Назначение обработчиков для кнопок управления
             upButton.addEventListener('click', () => {
                 gameState.player.lastDirection = { x: 0, y: -1 };
@@ -1448,9 +1447,6 @@
             // Первоначальная отрисовка
             updateCamera();
             render();
-            
-            // Запуск игры
-            startGame();
         }
         
         // Запуск инициализации при загрузке страницы
