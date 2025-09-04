@@ -104,6 +104,14 @@
             background: linear-gradient(to bottom, #AB47BC, #8E24AA);
         }
         
+        .project-btn {
+            background: linear-gradient(to bottom, #2196F3, #0D47A1);
+        }
+        
+        .project-btn:hover {
+            background: linear-gradient(to bottom, #42A5F5, #1565C0);
+        }
+        
         .stats {
             display: flex;
             justify-content: space-around;
@@ -358,7 +366,7 @@
             <div class="control-group">
                 <h3>Игра</h3>
                 <button id="startButton">Старт (Enter)</button>
-                <button id="pauseButton">Пауза (P)</button>
+                <button id="pauseButton">Пауза (Q)</button>
             </div>
         </div>
         
@@ -378,7 +386,13 @@
             <p>Остерегайтесь мин <span style="color: #ff0000; font-weight: bold">X</span> - они наносят урон при наступлении!</p>
             <p>После убийства 50 врагов скорость всех противников увеличивается в 2 раза!</p>
             <p>Нельзя купить одно и то же оружие дважды или более слабое оружие.</p>
+            <p>Уборщик <span style="color: #00ff7f; font-weight: bold">C</span> нейтрализует мины своим здоровьем!</p>
+            <p>Спидстер <span style="color: #ff00ff; font-weight: bold">S</span> - быстрый враг с 3 здоровьем!</p>
         </div>
+
+        <a href="https://salruz.github.io/Code/" target="_blank" class="project-btn" style="text-decoration: none; display: inline-block; margin: 10px;">
+            Другой проект от SalRuzO (секретный код: меню)
+        </a>
     </div>
 
     <script>
@@ -391,6 +405,7 @@
         const PLAYER_CHAR = '@';
         const ENEMY_CHAR = '&';
         const ARMORED_ENEMY_CHAR = 'A';
+        const SPEEDSTER_CHAR = 'S';
         const GHOST_CHAR = 'Ø';
         const BULLET_CHAR = '*';
         const HEALTH_CHAR = '+';
@@ -398,6 +413,7 @@
         const COIN_CHAR = '$';
         const WALL_CHAR = '#';
         const FIGHTER_CHAR = 'B';
+        const CLEANER_CHAR = 'C';
         const MINE_CHAR = 'X';
         const MAX_HEALTH = 5;
         const START_AMMO = 5;
@@ -444,6 +460,10 @@
         const downButton = document.getElementById('downButton');
         const rightButton = document.getElementById('rightButton');
         
+        // Переменные для чит-кода
+        let cheatCode = '';
+        let cheatTimer = null;
+        
         // Состояние игры
         let gameState = {
             player: { 
@@ -456,8 +476,10 @@
             },
             enemies: [],
             armoredEnemies: [],
+            speedsters: [],
             ghosts: [],
             fighters: [],
+            cleaners: [],
             bullets: [],
             healthPacks: [],
             ammoPacks: [],
@@ -466,17 +488,21 @@
             maze: [],
             lastEnemySpawn: 0,
             lastArmoredEnemySpawn: 0,
+            lastSpeedsterSpawn: 0,
             lastGhostSpawn: 0,
             lastAmmoSpawn: 0,
             lastHealthSpawn: 0,
             lastFighterSpawn: 0,
+            lastCleanerSpawn: 0,
             lastMineSpawn: 0,
             enemySpawnInterval: 10,
             armoredEnemySpawnInterval: 40,
+            speedsterSpawnInterval: 25,
             ghostSpawnInterval: 20,
             ammoSpawnInterval: 30,
             healthSpawnInterval: 60,
             fighterSpawnInterval: 30,
+            cleanerSpawnInterval: 60,
             mineSpawnInterval: 10,
             lastUpdate: 0,
             survivalTime: 0,
@@ -539,7 +565,7 @@
                 maze[i][GRID_WIDTH-1] = 1;
             }
             
-            // Меньше стен для большой карты
+            // Меньше стен для большой карта
             const wallCount = Math.floor(GRID_WIDTH * GRID_HEIGHT * 0.08);
             
             for (let i = 0; i < wallCount; i++) {
@@ -584,7 +610,7 @@
             return maze;
         }
         
-        // Создание структур, напоминающих дома
+        // Создание структур, напоминающих дома (без тупиков)
         function createHouseStructures(maze) {
             // Создаем несколько домов/комнат
             for (let i = 0; i < 8; i++) {
@@ -592,6 +618,26 @@
                 const roomHeight = 5 + Math.floor(Math.random() * 6);
                 const x = 5 + Math.floor(Math.random() * (GRID_WIDTH - roomWidth - 10));
                 const y = 5 + Math.floor(Math.random() * (GRID_HEIGHT - roomHeight - 10));
+                
+                // Проверяем, чтобы комната не перекрывала важные пути
+                let validRoom = true;
+                for (let ry = y - 1; ry < y + roomHeight + 1; ry++) {
+                    for (let rx = x - 1; rx < x + roomWidth + 1; rx++) {
+                        if (rx >= 0 && rx < GRID_WIDTH && ry >= 0 && ry < GRID_HEIGHT) {
+                            // Проверяем, чтобы комната не блокировала проходы
+                            if (maze[ry][rx] === 0 && 
+                                (ry === y - 1 || ry === y + roomHeight || 
+                                 rx === x - 1 || rx === x + roomWidth)) {
+                                // Если рядом с комнатой уже есть проход, пропускаем эту комнату
+                                validRoom = false;
+                                break;
+                            }
+                        }
+                    }
+                    if (!validRoom) break;
+                }
+                
+                if (!validRoom) continue;
                 
                 // Создаем комнату
                 for (let ry = y; ry < y + roomHeight; ry++) {
@@ -604,7 +650,7 @@
                     }
                 }
                 
-                // Добавляем дверные проемы
+                // Добавляем минимум 2 дверных проема (гарантируем отсутствие тупиков)
                 const doorPositions = [
                     { x: x + Math.floor(roomWidth / 2), y: y }, // Верхняя стена
                     { x: x + Math.floor(roomWidth / 2), y: y + roomHeight - 1 }, // Нижняя стена
@@ -612,12 +658,21 @@
                     { x: x + roomWidth - 1, y: y + Math.floor(roomHeight / 2) } // Правая стена
                 ];
                 
-                // Выбираем 1-2 случайные двери
-                const doorCount = 1 + Math.floor(Math.random() * 2);
+                // Выбираем 2 случайные двери (гарантируем проходы)
+                const doorCount = 2;
+                const selectedDoors = [];
+                
                 for (let d = 0; d < doorCount; d++) {
-                    const door = doorPositions[Math.floor(Math.random() * doorPositions.length)];
+                    let door;
+                    let attempts = 0;
+                    do {
+                        door = doorPositions[Math.floor(Math.random() * doorPositions.length)];
+                        attempts++;
+                    } while (selectedDoors.includes(door) && attempts < 10);
+                    
                     if (door.x >= 0 && door.x < GRID_WIDTH && door.y >= 0 && door.y < GRID_HEIGHT) {
                         maze[door.y][door.x] = 0;
+                        selectedDoors.push(door);
                     }
                 }
             }
@@ -705,6 +760,12 @@
                 }
             }
             
+            for (const speedster of gameState.speedsters) {
+                if (speedster.x === x && speedster.y === y) {
+                    return false;
+                }
+            }
+            
             for (const ghost of gameState.ghosts) {
                 if (ghost.x === x && ghost.y === y) {
                     return false;
@@ -713,6 +774,12 @@
             
             for (const fighter of gameState.fighters) {
                 if (fighter.x === x && fighter.y === y) {
+                    return false;
+                }
+            }
+            
+            for (const cleaner of gameState.cleaners) {
+                if (cleaner.x === x && cleaner.y === y) {
                     return false;
                 }
             }
@@ -746,6 +813,22 @@
             }
             
             return { target: closestTarget, isFighter };
+        }
+        
+        // Найти ближайшую мину для уборщика
+        function findClosestMine(cleanerX, cleanerY) {
+            let closestMine = null;
+            let minDist = Infinity;
+            
+            for (const mine of gameState.mines) {
+                const dist = Math.sqrt(Math.pow(cleanerX - mine.x, 2) + Math.pow(cleanerY - mine.y, 2));
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestMine = mine;
+                }
+            }
+            
+            return closestMine;
         }
         
         // Спавн врага
@@ -803,6 +886,34 @@
             }
         }
         
+        // Спавн спидстера
+        function spawnSpeedster() {
+            let x, y;
+            let attempts = 0;
+            
+            do {
+                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
+                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
+                attempts++;
+            } while ((gameState.maze[y][x] === 1 || 
+                     Math.abs(x - gameState.player.x) < 15 || 
+                     Math.abs(y - gameState.player.y) < 15) && 
+                     attempts < 100);
+            
+            if (attempts < 100) {
+                gameState.speedsters.push({
+                    x: x,
+                    y: y,
+                    lastMove: 0,
+                    path: [],
+                    pathUpdateTime: 0,
+                    hits: 0,
+                    health: 3,
+                    moveSpeed: 0.1 * gameState.enemySpeedMultiplier // В 5 раз быстрее обычного
+                });
+            }
+        }
+        
         // Спавн призрака
         function spawnGhost() {
             let x, y;
@@ -853,6 +964,33 @@
                     pathUpdateTime: 0,
                     health: 3,
                     target: null
+                });
+            }
+        }
+        
+        // Спавн уборщика
+        function spawnCleaner() {
+            let x, y;
+            let attempts = 0;
+            
+            do {
+                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
+                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
+                attempts++;
+            } while ((gameState.maze[y][x] === 1 || 
+                     Math.abs(x - gameState.player.x) < 10 || 
+                     Math.abs(y - gameState.player.y) < 10) && 
+                     attempts < 100);
+            
+            if (attempts < 100) {
+                gameState.cleaners.push({
+                    x: x,
+                    y: y,
+                    lastMove: 0,
+                    path: [],
+                    pathUpdateTime: 0,
+                    health: 10,
+                    targetMine: null
                 });
             }
         }
@@ -922,6 +1060,33 @@
                     }
                 }
             }
+        }
+        
+        // Активация чит-кода (спавн 4 бойцов вокруг игрока)
+        function activateCheatCode() {
+            const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+            
+            for (const [dx, dy] of directions) {
+                const x = gameState.player.x + dx * 2;
+                const y = gameState.player.y + dy * 2;
+                
+                if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT && gameState.maze[y][x] === 0) {
+                    gameState.fighters.push({
+                        x: x,
+                        y: y,
+                        lastMove: 0,
+                        lastShoot: 0,
+                        path: [],
+                        pathUpdateTime: 0,
+                        health: 3,
+                        target: null
+                    });
+                }
+            }
+            
+            // Визуальный эффект активации чита
+            gameState.player.health = MAX_HEALTH;
+            updateHealthDisplay();
         }
         
         // Движение врагов с улучшенным ИИ
@@ -1018,6 +1183,53 @@
             }
         }
         
+        // Движение спидстеров
+        function moveSpeedsters(deltaTime) {
+            for (const speedster of gameState.speedsters) {
+                speedster.lastMove += deltaTime;
+                speedster.pathUpdateTime += deltaTime;
+                
+                if (speedster.lastMove >= speedster.moveSpeed) {
+                    speedster.lastMove = 0;
+                    
+                    // Находим ближайшую цель
+                    const { target, isFighter } = findClosestTarget(speedster.x, speedster.y);
+                    
+                    if (speedster.pathUpdateTime >= 1 || speedster.path.length === 0) {
+                        speedster.pathUpdateTime = 0;
+                        speedster.path = findPath(speedster.x, speedster.y, target.x, target.y);
+                    }
+                    
+                    if (speedster.path && speedster.path.length > 1) {
+                        const nextStep = speedster.path[1];
+                        speedster.x = nextStep.x;
+                        speedster.y = nextStep.y;
+                        speedster.path.shift();
+                    }
+                    
+                    // Проверяем столкновение с целью
+                    if (isFighter) {
+                        // Атакуем бойца
+                        for (let i = gameState.fighters.length - 1; i >= 0; i--) {
+                            const fighter = gameState.fighters[i];
+                            if (speedster.x === fighter.x && speedster.y === fighter.y) {
+                                fighter.health -= 1;
+                                if (fighter.health <= 0) {
+                                    gameState.fighters.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                speedster.x += Math.sign(speedster.x - fighter.x);
+                                speedster.y += Math.sign(speedster.y - fighter.y);
+                                break;
+                            }
+                        }
+                    } else if (speedster.x === gameState.player.x && speedster.y === gameState.player.y) {
+                        playerHit();
+                    }
+                }
+            }
+        }
+        
         // Движение призраков (могут проходить сквозь стены)
         function moveGhosts(deltaTime) {
             for (const ghost of gameState.ghosts) {
@@ -1076,7 +1288,7 @@
                 let closestEnemy = null;
                 let minDist = Infinity;
                 
-                for (const enemy of [...gameState.enemies, ...gameState.armoredEnemies, ...gameState.ghosts]) {
+                for (const enemy of [...gameState.enemies, ...gameState.armoredEnemies, ...gameState.speedsters, ...gameState.ghosts]) {
                     const dist = Math.sqrt(Math.pow(enemy.x - fighter.x, 2) + Math.pow(enemy.y - fighter.y, 2));
                     if (dist < minDist) {
                         minDist = dist;
@@ -1150,6 +1362,60 @@
             }
         }
         
+        // Движение уборщиков
+        function moveCleaners(deltaTime) {
+            for (const cleaner of gameState.cleaners) {
+                cleaner.lastMove += deltaTime;
+                cleaner.pathUpdateTime += deltaTime;
+                
+                if (cleaner.lastMove >= 0.5) {
+                    cleaner.lastMove = 0;
+                    
+                    // Находим ближайшую мину
+                    cleaner.targetMine = findClosestMine(cleaner.x, cleaner.y);
+                    
+                    if (cleaner.targetMine) {
+                        // Двигаться к мине
+                        if (cleaner.pathUpdateTime >= 2 || cleaner.path.length === 0) {
+                            cleaner.pathUpdateTime = 0;
+                            cleaner.path = findPath(cleaner.x, cleaner.y, cleaner.targetMine.x, cleaner.targetMine.y);
+                        }
+                        
+                        if (cleaner.path && cleaner.path.length > 1) {
+                            const nextStep = cleaner.path[1];
+                            cleaner.x = nextStep.x;
+                            cleaner.y = nextStep.y;
+                            cleaner.path.shift();
+                        }
+                        
+                        // Нейтрализация мины
+                        if (cleaner.x === cleaner.targetMine.x && cleaner.y === cleaner.targetMine.y) {
+                            cleaner.health -= 1; // Теряем здоровье при нейтрализации
+                            gameState.mines = gameState.mines.filter(m => m.x !== cleaner.targetMine.x || m.y !== cleaner.targetMine.y);
+                            cleaner.targetMine = null;
+                            
+                            if (cleaner.health <= 0) {
+                                gameState.cleaners = gameState.cleaners.filter(c => c !== cleaner);
+                            }
+                        }
+                    } else {
+                        // Случайное движение, если нет мин
+                        const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+                        const dir = directions[Math.floor(Math.random() * directions.length)];
+                        
+                        const newX = cleaner.x + dir[0];
+                        const newY = cleaner.y + dir[1];
+                        
+                        if (newX >= 0 && newX < GRID_WIDTH && newY >= 0 && newY < GRID_HEIGHT && 
+                            gameState.maze[newY][newX] === 0) {
+                            cleaner.x = newX;
+                            cleaner.y = newY;
+                        }
+                    }
+                }
+            }
+        }
+        
         // Движение пуль
         function moveBullets(deltaTime) {
             for (let i = gameState.bullets.length - 1; i >= 0; i--) {
@@ -1219,6 +1485,29 @@
                     }
                 }
                 
+                // Проверка попадания в спидстеров
+                for (let j = gameState.speedsters.length - 1; j >= 0; j--) {
+                    const speedster = gameState.speedsters[j];
+                    
+                    if (Math.floor(bullet.x) === speedster.x && Math.floor(bullet.y) === speedster.y) {
+                        speedster.hits += bullet.fromFighter ? 1 : gameState.player.weapon.damage;
+                        
+                        if (speedster.hits >= speedster.health) {
+                            gameState.speedsters.splice(j, 1);
+                            gameState.score += 15;
+                            gameState.coinsCount += 2;
+                            gameState.kills += 1;
+                            gameState.coins.push({
+                                x: speedster.x,
+                                y: speedster.y
+                            });
+                        }
+                        
+                        gameState.bullets.splice(i, 1);
+                        break;
+                    }
+                }
+                
                 // Проверка попадания в призраков
                 for (let j = gameState.ghosts.length - 1; j >= 0; j--) {
                     const ghost = gameState.ghosts[j];
@@ -1251,6 +1540,22 @@
                         
                         if (fighter.health <= 0) {
                             gameState.fighters.splice(j, 1);
+                        }
+                        
+                        gameState.bullets.splice(i, 1);
+                        break;
+                    }
+                }
+                
+                // Проверка попадания в уборщиков (дружественный огонь)
+                for (let j = gameState.cleaners.length - 1; j >= 0; j--) {
+                    const cleaner = gameState.cleaners[j];
+                    
+                    if (Math.floor(bullet.x) === cleaner.x && Math.floor(bullet.y) === cleaner.y && !bullet.fromFighter) {
+                        cleaner.health -= 1;
+                        
+                        if (cleaner.health <= 0) {
+                            gameState.cleaners.splice(j, 1);
                         }
                         
                         gameState.bullets.splice(i, 1);
@@ -1322,6 +1627,9 @@
                 }
                 for (const armoredEnemy of gameState.armoredEnemies) {
                     armoredEnemy.moveSpeed = 0.5 * gameState.enemySpeedMultiplier;
+                }
+                for (const speedster of gameState.speedsters) {
+                    speedster.moveSpeed = 0.1 * gameState.enemySpeedMultiplier;
                 }
                 for (const ghost of gameState.ghosts) {
                     ghost.moveSpeed = 0.4 * gameState.enemySpeedMultiplier;
@@ -1412,7 +1720,7 @@
             }
         }
         
-        // Обновление кнопок магазина
+        // Обновление кнопки магазина
         function updateShopButtons() {
             const currentLevel = gameState.player.weapon.level;
             
@@ -1442,6 +1750,27 @@
         function toggleShop() {
             gameState.shopOpen = !gameState.shopOpen;
             shopElement.style.display = gameState.shopOpen ? 'block' : 'none';
+        }
+        
+        // Обработка чит-кода
+        function handleCheatCode(key) {
+            cheatCode += key;
+            
+            // Сбрасываем таймер, если он уже был установлен
+            if (cheatTimer) {
+                clearTimeout(cheatTimer);
+            }
+            
+            // Устанавливаем новый таймер для сброса кода
+            cheatTimer = setTimeout(() => {
+                cheatCode = '';
+            }, 2000);
+            
+            // Проверяем, совпадает ли введенный код с MYLP
+            if (cheatCode === 'MYLP') {
+                activateCheatCode();
+                cheatCode = ''; // Сбрасываем код после активации
+            }
         }
         
         // Отрисовка игры
@@ -1584,6 +1913,26 @@
                 }
             }
             
+            // Отрисовка спидстеров
+            for (const speedster of gameState.speedsters) {
+                if (speedster.x >= startX && speedster.x < endX && speedster.y >= startY && speedster.y < endY) {
+                    const intensity = 1 - (speedster.hits / speedster.health) * 0.5;
+                    ctx.fillStyle = `rgb(${Math.floor(255 * intensity)}, ${Math.floor(0 * intensity)}, ${Math.floor(255 * intensity)})`;
+                    
+                    ctx.fillRect(toScreenX(speedster.x), toScreenY(speedster.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(SPEEDSTER_CHAR, toScreenX(speedster.x) + CELL_SIZE/2, toScreenY(speedster.y) + CELL_SIZE/2);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(`${speedster.hits}/${speedster.health}`, toScreenX(speedster.x) + CELL_SIZE/2, toScreenY(speedster.y) + CELL_SIZE - 3);
+                }
+            }
+            
             // Отрисовка призраков
             for (const ghost of gameState.ghosts) {
                 if (ghost.x >= startX && ghost.x < endX && ghost.y >= startY && ghost.y < endY) {
@@ -1622,6 +1971,24 @@
                 }
             }
             
+            // Отрисовка уборщиков
+            for (const cleaner of gameState.cleaners) {
+                if (cleaner.x >= startX && cleaner.x < endX && cleaner.y >= startY && cleaner.y < endY) {
+                    ctx.fillStyle = '#00ff7f';
+                    ctx.fillRect(toScreenX(cleaner.x), toScreenY(cleaner.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(CLEANER_CHAR, toScreenX(cleaner.x) + CELL_SIZE/2, toScreenY(cleaner.y) + CELL_SIZE/2);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(`${cleaner.health}/10`, toScreenX(cleaner.x) + CELL_SIZE/2, toScreenY(cleaner.y) + CELL_SIZE - 3);
+                }
+            }
+            
             // Отрисовка игрока
             ctx.fillStyle = gameState.lastHitTime > Date.now() / 1000 - 0.5 ? '#ff0000' : '#3498db';
             ctx.fillRect(toScreenX(gameState.player.x), toScreenY(gameState.player.y), CELL_SIZE, CELL_SIZE);
@@ -1657,6 +2024,13 @@
                     gameState.lastArmoredEnemySpawn = 0;
                 }
                 
+                // Спавн спидстеров
+                gameState.lastSpeedsterSpawn += deltaTime;
+                if (gameState.lastSpeedsterSpawn >= gameState.speedsterSpawnInterval) {
+                    spawnSpeedster();
+                    gameState.lastSpeedsterSpawn = 0;
+                }
+                
                 // Спавн призраков
                 gameState.lastGhostSpawn += deltaTime;
                 if (gameState.lastGhostSpawn >= gameState.ghostSpawnInterval) {
@@ -1669,6 +2043,13 @@
                 if (gameState.lastFighterSpawn >= gameState.fighterSpawnInterval) {
                     spawnFighter();
                     gameState.lastFighterSpawn = 0;
+                }
+                
+                // Спавн уборщиков
+                gameState.lastCleanerSpawn += deltaTime;
+                if (gameState.lastCleanerSpawn >= gameState.cleanerSpawnInterval) {
+                    spawnCleaner();
+                    gameState.lastCleanerSpawn = 0;
                 }
                 
                 // Спавн мин
@@ -1698,11 +2079,17 @@
                 // Движение бронированных врагов
                 moveArmoredEnemies(deltaTime);
                 
+                // Движение спидстеров
+                moveSpeedsters(deltaTime);
+                
                 // Движение призраков
                 moveGhosts(deltaTime);
                 
                 // Движение бойцов
                 moveFighters(deltaTime);
+                
+                // Движение уборщиков
+                moveCleaners(deltaTime);
                 
                 // Движение пуль
                 moveBullets(deltaTime);
@@ -1731,7 +2118,8 @@
         function updateStats() {
             scoreElement.textContent = gameState.score;
             coinsElement.textContent = gameState.coinsCount;
-            enemyCountElement.textContent = gameState.enemies.length + gameState.armoredEnemies.length + gameState.ghosts.length;
+            enemyCountElement.textContent = gameState.enemies.length + gameState.armoredEnemies.length + 
+                                          gameState.speedsters.length + gameState.ghosts.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
             updateKillsDisplay();
         }
@@ -1786,10 +2174,20 @@
                     e.preventDefault();
                     startGame();
                     break;
-                case 'p':
-                case 'P':
+                case 'q':
+                case 'Q':
                     e.preventDefault();
                     pauseGame();
+                    break;
+                case 'm':
+                case 'M':
+                case 'y':
+                case 'Y':
+                case 'l':
+                case 'L':
+                case 'p':
+                case 'P':
+                    handleCheatCode(e.key.toUpperCase());
                     break;
             }
             
@@ -1826,8 +2224,10 @@
             };
             gameState.enemies = [];
             gameState.armoredEnemies = [];
+            gameState.speedsters = [];
             gameState.ghosts = [];
             gameState.fighters = [];
+            gameState.cleaners = [];
             gameState.bullets = [];
             gameState.healthPacks = [];
             gameState.ammoPacks = [];
@@ -1836,10 +2236,12 @@
             gameState.maze = createMaze();
             gameState.lastEnemySpawn = 0;
             gameState.lastArmoredEnemySpawn = 0;
+            gameState.lastSpeedsterSpawn = 0;
             gameState.lastGhostSpawn = 0;
             gameState.lastAmmoSpawn = 0;
             gameState.lastHealthSpawn = 0;
             gameState.lastFighterSpawn = 0;
+            gameState.lastCleanerSpawn = 0;
             gameState.lastMineSpawn = 0;
             gameState.survivalTime = 0;
             gameState.score = 0;
