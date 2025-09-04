@@ -285,6 +285,10 @@
                 <span>Выживание:</span>
                 <span id="survivalTime" class="stat-value">0 сек</span>
             </div>
+            <div class="stat">
+                <span>Убито врагов:</span>
+                <span id="kills" class="stat-value">0</span>
+            </div>
         </div>
         
         <div class="game-container">
@@ -296,6 +300,7 @@
                 <p>Набрано очков: <span id="finalScore">0</span></p>
                 <p>Собрано монет: <span id="finalCoins">0</span></p>
                 <p>Время выживания: <span id="finalTime">0</span> секунд</p>
+                <p>Убито врагов: <span id="finalKills">0</span></p>
                 <button id="restartButton">Играть снова</button>
             </div>
             
@@ -346,7 +351,7 @@
             <div class="control-group">
                 <h3>Действия</h3>
                 <button id="shootButton" class="shoot-btn">Стрелять</button>
-                <button id="openShopButton" class="buy-btn">Магазин (M)</button>
+                <button id="openShopButton" class="buy-btn">Магазин (E)</button>
                 <div>Направление: <span id="directionIndicator">↓</span></div>
             </div>
             
@@ -365,19 +370,21 @@
             <p>Стреляйте во врагов <span style="color: #e74c3c; font-weight: bold">&</span> с помощью кнопки стрельбы или клавиши <span class="key">SPACE</span></p>
             <p>Направление стрельбы зависит от последнего движения</p>
             <p>Собирайте патроны <span style="color: #FFD700; font-weight: bold">♦</span>, монеты <span style="color: #FFD700; font-weight: bold">$</span> и жизни <span style="color: #00ff00; font-weight: bold">+</span></p>
-            <p>Покупайте улучшения в магазине (кнопка Магазин или клавиша <span class="key">M</span>)</p>
+            <p>Покупайте улучшения в магазине (кнопка Магазин или клавиша <span class="key">E</span>)</p>
             <p>Избегайте врагов - у вас 5 жизней! Враги действуют как стены.</p>
             <p>Остерегайтесь призраков <span style="color: #9b59b6; font-weight: bold">Ø</span> - они проходят сквозь стены и дают 2 монеты!</p>
             <p>Каждые 30 секунд появляется боец <span style="color: #00bfff; font-weight: bold">B</span>, который помогает вам!</p>
-            <p>Каждые 40 секунд появляется бронированный враг <span style="color: #ff4500; font-weight: bold">A</span> с 6 жизнями!</p>
+            <p>Каждые 40 секунд появляется бронированный враг <span style="color: #ff4500; font-weight: bold">A</span> с 6 жизнями! Дает 3 монеты.</p>
             <p>Остерегайтесь мин <span style="color: #ff0000; font-weight: bold">X</span> - они наносят урон при наступлении!</p>
+            <p>После убийства 50 врагов скорость всех противников увеличивается в 2 раза!</p>
+            <p>Нельзя купить одно и то же оружие дважды или более слабое оружие.</p>
         </div>
     </div>
 
     <script>
         // Константы и настройки игры
         const CELL_SIZE = 20;
-        const GRID_WIDTH = 100;  // Увеличено до 100x100
+        const GRID_WIDTH = 100;
         const GRID_HEIGHT = 100;
         const VIEWPORT_WIDTH = 40;
         const VIEWPORT_HEIGHT = 30;
@@ -397,9 +404,9 @@
         
         // Типы оружия
         const WEAPON_TYPES = {
-            NORMAL: { damage: 1, hitsRequired: 3, cost: 0, name: "Обычное" },
-            IMPROVED: { damage: 2, hitsRequired: 2, cost: 50, name: "Улучшенное" },
-            POWERFUL: { damage: 3, hitsRequired: 1, cost: 100, name: "Мощное" }
+            NORMAL: { damage: 1, hitsRequired: 3, cost: 0, name: "Обычное", level: 1 },
+            IMPROVED: { damage: 2, hitsRequired: 2, cost: 50, name: "Улучшенное", level: 2 },
+            POWERFUL: { damage: 3, hitsRequired: 1, cost: 100, name: "Мощное", level: 3 }
         };
         
         // Элементы DOM
@@ -412,10 +419,12 @@
         const healthDisplayElement = document.getElementById('healthDisplay');
         const weaponElement = document.getElementById('weapon');
         const survivalTimeElement = document.getElementById('survivalTime');
+        const killsElement = document.getElementById('kills');
         const gameOverElement = document.getElementById('gameOver');
         const finalScoreElement = document.getElementById('finalScore');
         const finalCoinsElement = document.getElementById('finalCoins');
         finalTimeElement = document.getElementById('finalTime');
+        const finalKillsElement = document.getElementById('finalKills');
         const restartButton = document.getElementById('restartButton');
         const startButton = document.getElementById('startButton');
         const pauseButton = document.getElementById('pauseButton');
@@ -468,17 +477,20 @@
             ammoSpawnInterval: 30,
             healthSpawnInterval: 60,
             fighterSpawnInterval: 30,
-            mineSpawnInterval: 20,
+            mineSpawnInterval: 10,
             lastUpdate: 0,
             survivalTime: 0,
             score: 0,
             coinsCount: 0,
+            kills: 0,
             isRunning: false,
             gameOver: false,
             lastHitTime: 0,
             hitCooldown: 1,
             camera: { x: 0, y: 0 },
-            shopOpen: false
+            shopOpen: false,
+            enemySpeedMultiplier: 1,
+            speedIncreased: false
         };
         
         // Обновление позиции камеры
@@ -512,7 +524,7 @@
             return Math.floor(screenY / CELL_SIZE + gameState.camera.y);
         }
         
-        // Создание лабиринта
+        // Создание лабиринта со структурами, напоминающими дома
         function createMaze() {
             const maze = Array(GRID_HEIGHT).fill().map(() => Array(GRID_WIDTH).fill(0));
             
@@ -553,6 +565,9 @@
                 }
             }
             
+            // Создание структур, напоминающих дома (комнаты с дверными проемами)
+            createHouseStructures(maze);
+            
             // Гарантируем, что игрок может двигаться
             const playerX = Math.floor(GRID_WIDTH / 2);
             const playerY = Math.floor(GRID_HEIGHT / 2);
@@ -567,6 +582,45 @@
             }
             
             return maze;
+        }
+        
+        // Создание структур, напоминающих дома
+        function createHouseStructures(maze) {
+            // Создаем несколько домов/комнат
+            for (let i = 0; i < 8; i++) {
+                const roomWidth = 5 + Math.floor(Math.random() * 6);
+                const roomHeight = 5 + Math.floor(Math.random() * 6);
+                const x = 5 + Math.floor(Math.random() * (GRID_WIDTH - roomWidth - 10));
+                const y = 5 + Math.floor(Math.random() * (GRID_HEIGHT - roomHeight - 10));
+                
+                // Создаем комнату
+                for (let ry = y; ry < y + roomHeight; ry++) {
+                    for (let rx = x; rx < x + roomWidth; rx++) {
+                        if (ry === y || ry === y + roomHeight - 1 || rx === x || rx === x + roomWidth - 1) {
+                            if (rx >= 0 && rx < GRID_WIDTH && ry >= 0 && ry < GRID_HEIGHT) {
+                                maze[ry][rx] = 1;
+                            }
+                        }
+                    }
+                }
+                
+                // Добавляем дверные проемы
+                const doorPositions = [
+                    { x: x + Math.floor(roomWidth / 2), y: y }, // Верхняя стена
+                    { x: x + Math.floor(roomWidth / 2), y: y + roomHeight - 1 }, // Нижняя стена
+                    { x: x, y: y + Math.floor(roomHeight / 2) }, // Левая стена
+                    { x: x + roomWidth - 1, y: y + Math.floor(roomHeight / 2) } // Правая стена
+                ];
+                
+                // Выбираем 1-2 случайные двери
+                const doorCount = 1 + Math.floor(Math.random() * 2);
+                for (let d = 0; d < doorCount; d++) {
+                    const door = doorPositions[Math.floor(Math.random() * doorPositions.length)];
+                    if (door.x >= 0 && door.x < GRID_WIDTH && door.y >= 0 && door.y < GRID_HEIGHT) {
+                        maze[door.y][door.x] = 0;
+                    }
+                }
+            }
         }
         
         // Поиск пути (упрощенный алгоритм A*)
@@ -675,6 +729,25 @@
             return true;
         }
         
+        // Найти ближайшую цель для противника
+        function findClosestTarget(enemyX, enemyY) {
+            let closestTarget = gameState.player;
+            let minDist = Math.sqrt(Math.pow(enemyX - gameState.player.x, 2) + Math.pow(enemyY - gameState.player.y, 2));
+            let isFighter = false;
+            
+            // Проверяем бойцов
+            for (const fighter of gameState.fighters) {
+                const dist = Math.sqrt(Math.pow(enemyX - fighter.x, 2) + Math.pow(enemyY - fighter.y, 2));
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestTarget = fighter;
+                    isFighter = true;
+                }
+            }
+            
+            return { target: closestTarget, isFighter };
+        }
+        
         // Спавн врага
         function spawnEnemy() {
             let x, y;
@@ -696,7 +769,8 @@
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
-                    hits: 0
+                    hits: 0,
+                    moveSpeed: 0.5 * gameState.enemySpeedMultiplier
                 });
             }
         }
@@ -723,7 +797,8 @@
                     path: [],
                     pathUpdateTime: 0,
                     hits: 0,
-                    health: 6
+                    health: 6,
+                    moveSpeed: 0.5 * gameState.enemySpeedMultiplier
                 });
             }
         }
@@ -748,7 +823,8 @@
                     lastMove: 0,
                     path: [],
                     pathUpdateTime: 0,
-                    hits: 0
+                    hits: 0,
+                    moveSpeed: 0.4 * gameState.enemySpeedMultiplier
                 });
             }
         }
@@ -825,14 +901,25 @@
             }
         }
         
-        // Спавн мин
+        // Спавн мин (бронированные противники оставляют мины)
         function spawnMine() {
             for (const armoredEnemy of gameState.armoredEnemies) {
-                if (Math.random() < 0.3) { // 30% шанс оставить мину
-                    gameState.mines.push({
-                        x: armoredEnemy.x,
-                        y: armoredEnemy.y
-                    });
+                if (Math.random() < 0.5) { // 50% шанс оставить мину
+                    let minePlaced = false;
+                    // Проверяем, нет ли уже мины на этой позиции
+                    for (const mine of gameState.mines) {
+                        if (mine.x === armoredEnemy.x && mine.y === armoredEnemy.y) {
+                            minePlaced = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!minePlaced) {
+                        gameState.mines.push({
+                            x: armoredEnemy.x,
+                            y: armoredEnemy.y
+                        });
+                    }
                 }
             }
         }
@@ -843,12 +930,15 @@
                 enemy.lastMove += deltaTime;
                 enemy.pathUpdateTime += deltaTime;
                 
-                if (enemy.lastMove >= 0.5) {
+                if (enemy.lastMove >= enemy.moveSpeed) {
                     enemy.lastMove = 0;
+                    
+                    // Находим ближайшую цель
+                    const { target, isFighter } = findClosestTarget(enemy.x, enemy.y);
                     
                     if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
                         enemy.pathUpdateTime = 0;
-                        enemy.path = findPath(enemy.x, enemy.y, gameState.player.x, gameState.player.y);
+                        enemy.path = findPath(enemy.x, enemy.y, target.x, target.y);
                     }
                     
                     if (enemy.path && enemy.path.length > 1) {
@@ -858,7 +948,23 @@
                         enemy.path.shift();
                     }
                     
-                    if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
+                    // Проверяем столкновение с целью
+                    if (isFighter) {
+                        // Атакуем бойца
+                        for (let i = gameState.fighters.length - 1; i >= 0; i--) {
+                            const fighter = gameState.fighters[i];
+                            if (enemy.x === fighter.x && enemy.y === fighter.y) {
+                                fighter.health -= 1;
+                                if (fighter.health <= 0) {
+                                    gameState.fighters.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                enemy.x += Math.sign(enemy.x - fighter.x);
+                                enemy.y += Math.sign(enemy.y - fighter.y);
+                                break;
+                            }
+                        }
+                    } else if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
                         playerHit();
                     }
                 }
@@ -871,12 +977,15 @@
                 armoredEnemy.lastMove += deltaTime;
                 armoredEnemy.pathUpdateTime += deltaTime;
                 
-                if (armoredEnemy.lastMove >= 0.5) {
+                if (armoredEnemy.lastMove >= armoredEnemy.moveSpeed) {
                     armoredEnemy.lastMove = 0;
+                    
+                    // Находим ближайшую цель
+                    const { target, isFighter } = findClosestTarget(armoredEnemy.x, armoredEnemy.y);
                     
                     if (armoredEnemy.pathUpdateTime >= 2 || armoredEnemy.path.length === 0) {
                         armoredEnemy.pathUpdateTime = 0;
-                        armoredEnemy.path = findPath(armoredEnemy.x, armoredEnemy.y, gameState.player.x, gameState.player.y);
+                        armoredEnemy.path = findPath(armoredEnemy.x, armoredEnemy.y, target.x, target.y);
                     }
                     
                     if (armoredEnemy.path && armoredEnemy.path.length > 1) {
@@ -886,7 +995,70 @@
                         armoredEnemy.path.shift();
                     }
                     
-                    if (armoredEnemy.x === gameState.player.x && armoredEnemy.y === gameState.player.y) {
+                    // Проверяем столкновение с целью
+                    if (isFighter) {
+                        // Атакуем бойца
+                        for (let i = gameState.fighters.length - 1; i >= 0; i--) {
+                            const fighter = gameState.fighters[i];
+                            if (armoredEnemy.x === fighter.x && armoredEnemy.y === fighter.y) {
+                                fighter.health -= 1;
+                                if (fighter.health <= 0) {
+                                    gameState.fighters.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                armoredEnemy.x += Math.sign(armoredEnemy.x - fighter.x);
+                                armoredEnemy.y += Math.sign(armoredEnemy.y - fighter.y);
+                                break;
+                            }
+                        }
+                    } else if (armoredEnemy.x === gameState.player.x && armoredEnemy.y === gameState.player.y) {
+                        playerHit();
+                    }
+                }
+            }
+        }
+        
+        // Движение призраков (могут проходить сквозь стены)
+        function moveGhosts(deltaTime) {
+            for (const ghost of gameState.ghosts) {
+                ghost.lastMove += deltaTime;
+                ghost.pathUpdateTime += deltaTime;
+                
+                if (ghost.lastMove >= ghost.moveSpeed) {
+                    ghost.lastMove = 0;
+                    
+                    // Находим ближайшую цель
+                    const { target, isFighter } = findClosestTarget(ghost.x, ghost.y);
+                    
+                    if (ghost.pathUpdateTime >= 3 || ghost.path.length === 0) {
+                        ghost.pathUpdateTime = 0;
+                        
+                        // Призраки игнорируют стены при поиске пути
+                        const dx = Math.sign(target.x - ghost.x);
+                        const dy = Math.sign(target.y - ghost.y);
+                        
+                        // Простое движение к цели
+                        ghost.x += dx;
+                        ghost.y += dy;
+                    }
+                    
+                    // Проверяем столкновение с целью
+                    if (isFighter) {
+                        // Атакуем бойца
+                        for (let i = gameState.fighters.length - 1; i >= 0; i--) {
+                            const fighter = gameState.fighters[i];
+                            if (ghost.x === fighter.x && ghost.y === fighter.y) {
+                                fighter.health -= 1;
+                                if (fighter.health <= 0) {
+                                    gameState.fighters.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                ghost.x += Math.sign(ghost.x - fighter.x);
+                                ghost.y += Math.sign(ghost.y - fighter.y);
+                                break;
+                            }
+                        }
+                    } else if (ghost.x === gameState.player.x && ghost.y === gameState.player.y) {
                         playerHit();
                     }
                 }
@@ -931,17 +1103,17 @@
                             fighter.path.shift();
                         }
                     } else {
-                        // Двигаться к игроку
-                        if (fighter.pathUpdateTime >= 2 || fighter.path.length === 0) {
-                            fighter.pathUpdateTime = 0;
-                            fighter.path = findPath(fighter.x, fighter.y, gameState.player.x, gameState.player.y);
-                        }
+                        // Случайное движение, если нет врагов поблизости
+                        const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+                        const dir = directions[Math.floor(Math.random() * directions.length)];
                         
-                        if (fighter.path && fighter.path.length > 1) {
-                            const nextStep = fighter.path[1];
-                            fighter.x = nextStep.x;
-                            fighter.y = nextStep.y;
-                            fighter.path.shift();
+                        const newX = fighter.x + dir[0];
+                        const newY = fighter.y + dir[1];
+                        
+                        if (newX >= 0 && newX < GRID_WIDTH && newY >= 0 && newY < GRID_HEIGHT && 
+                            gameState.maze[newY][newX] === 0) {
+                            fighter.x = newX;
+                            fighter.y = newY;
                         }
                     }
                     
@@ -974,34 +1146,6 @@
                         lifetime: 2,
                         fromFighter: true
                     });
-                }
-            }
-        }
-        
-        // Движение призраков (могут проходить сквозь стены)
-        function moveGhosts(deltaTime) {
-            for (const ghost of gameState.ghosts) {
-                ghost.lastMove += deltaTime;
-                ghost.pathUpdateTime += deltaTime;
-                
-                if (ghost.lastMove >= 0.4) { // Призраки немного быстрее
-                    ghost.lastMove = 0;
-                    
-                    if (ghost.pathUpdateTime >= 3 || ghost.path.length === 0) {
-                        ghost.pathUpdateTime = 0;
-                        
-                        // Призраки игнорируют стены при поиске пути
-                        const dx = Math.sign(gameState.player.x - ghost.x);
-                        const dy = Math.sign(gameState.player.y - ghost.y);
-                        
-                        // Простое движение к игроку
-                        ghost.x += dx;
-                        ghost.y += dy;
-                    }
-                    
-                    if (ghost.x === gameState.player.x && ghost.y === gameState.player.y) {
-                        playerHit();
-                    }
                 }
             }
         }
@@ -1040,6 +1184,7 @@
                             gameState.enemies.splice(j, 1);
                             gameState.score += 10;
                             gameState.coinsCount += 1;
+                            gameState.kills += 1;
                             gameState.coins.push({
                                 x: enemy.x,
                                 y: enemy.y
@@ -1062,6 +1207,7 @@
                             gameState.armoredEnemies.splice(j, 1);
                             gameState.score += 20;
                             gameState.coinsCount += 3;
+                            gameState.kills += 1;
                             gameState.coins.push({
                                 x: armoredEnemy.x,
                                 y: armoredEnemy.y
@@ -1084,6 +1230,7 @@
                             gameState.ghosts.splice(j, 1);
                             gameState.score += 20; // Двойные очки за призрака
                             gameState.coinsCount += 2; // Двойные монеты за призрака
+                            gameState.kills += 1;
                             gameState.coins.push({
                                 x: ghost.x,
                                 y: ghost.y
@@ -1163,6 +1310,25 @@
             }
         }
         
+        // Увеличение скорости врагов после 50 убийств
+        function checkEnemySpeedIncrease() {
+            if (gameState.kills >= 50 && !gameState.speedIncreased) {
+                gameState.enemySpeedMultiplier = 2;
+                gameState.speedIncreased = true;
+                
+                // Обновляем скорость всех существующих врагов
+                for (const enemy of gameState.enemies) {
+                    enemy.moveSpeed = 0.5 * gameState.enemySpeedMultiplier;
+                }
+                for (const armoredEnemy of gameState.armoredEnemies) {
+                    armoredEnemy.moveSpeed = 0.5 * gameState.enemySpeedMultiplier;
+                }
+                for (const ghost of gameState.ghosts) {
+                    ghost.moveSpeed = 0.4 * gameState.enemySpeedMultiplier;
+                }
+            }
+        }
+        
         // Обновление отображения
         function updateHealthDisplay() {
             let hearts = '';
@@ -1182,6 +1348,10 @@
         
         function updateWeaponDisplay() {
             weaponElement.textContent = `${gameState.player.weapon.name} (${gameState.player.weapon.hitsRequired})`;
+        }
+        
+        function updateKillsDisplay() {
+            killsElement.textContent = gameState.kills;
         }
         
         // Выстрел
@@ -1229,11 +1399,31 @@
         
         // Покупка оружия
         function buyWeapon(weaponType) {
-            if (gameState.coinsCount >= weaponType.cost) {
+            // Нельзя купить то же самое или более слабое оружие
+            if (gameState.coinsCount >= weaponType.cost && 
+                weaponType.level > gameState.player.weapon.level) {
                 gameState.coinsCount -= weaponType.cost;
                 gameState.player.weapon = weaponType;
                 updateCoinsDisplay();
                 updateWeaponDisplay();
+                
+                // Обновляем кнопки магазина
+                updateShopButtons();
+            }
+        }
+        
+        // Обновление кнопок магазина
+        function updateShopButtons() {
+            const currentLevel = gameState.player.weapon.level;
+            
+            if (currentLevel >= 2) {
+                buyWeapon2Button.disabled = true;
+                buyWeapon2Button.textContent = "Уже куплено";
+            }
+            
+            if (currentLevel >= 3) {
+                buyWeapon3Button.disabled = true;
+                buyWeapon3Button.textContent = "Уже куплено";
             }
         }
         
@@ -1508,17 +1698,20 @@
                 // Движение бронированных врагов
                 moveArmoredEnemies(deltaTime);
                 
-                // Движение бойцов
-                moveFighters(deltaTime);
-                
                 // Движение призраков
                 moveGhosts(deltaTime);
+                
+                // Движение бойцов
+                moveFighters(deltaTime);
                 
                 // Движение пуль
                 moveBullets(deltaTime);
                 
                 // Проверка сбора предметов
                 checkItemCollection();
+                
+                // Проверка увеличения скорости врагов
+                checkEnemySpeedIncrease();
                 
                 // Обновление камеры
                 updateCamera();
@@ -1540,6 +1733,7 @@
             coinsElement.textContent = gameState.coinsCount;
             enemyCountElement.textContent = gameState.enemies.length + gameState.armoredEnemies.length + gameState.ghosts.length;
             survivalTimeElement.textContent = Math.floor(gameState.survivalTime) + ' сек';
+            updateKillsDisplay();
         }
         
         // Обработка нажатий клавиш
@@ -1584,8 +1778,8 @@
                     e.preventDefault();
                     shoot();
                     break;
-                case 'm':
-                case 'M':
+                case 'e':
+                case 'E':
                     toggleShop();
                     break;
                 case 'Enter':
@@ -1616,6 +1810,7 @@
             finalScoreElement.textContent = gameState.score;
             finalCoinsElement.textContent = gameState.coinsCount;
             finalTimeElement.textContent = Math.floor(gameState.survivalTime);
+            finalKillsElement.textContent = gameState.kills;
             gameOverElement.style.display = 'block';
         }
         
@@ -1649,16 +1844,26 @@
             gameState.survivalTime = 0;
             gameState.score = 0;
             gameState.coinsCount = 0;
+            gameState.kills = 0;
             gameState.gameOver = false;
             gameState.lastUpdate = 0;
             gameState.lastHitTime = 0;
             gameState.camera = { x: 0, y: 0 };
             gameState.shopOpen = false;
+            gameState.enemySpeedMultiplier = 1;
+            gameState.speedIncreased = false;
+            
+            // Сброс кнопок магазина
+            buyWeapon2Button.disabled = false;
+            buyWeapon2Button.textContent = "Купить";
+            buyWeapon3Button.disabled = false;
+            buyWeapon3Button.textContent = "Купить";
             
             updateHealthDisplay();
             updateAmmoDisplay();
             updateCoinsDisplay();
             updateWeaponDisplay();
+            updateKillsDisplay();
             updateDirectionIndicator();
             gameOverElement.style.display = 'none';
             shopElement.style.display = 'none';
@@ -1687,7 +1892,9 @@
             updateAmmoDisplay();
             updateCoinsDisplay();
             updateWeaponDisplay();
+            updateKillsDisplay();
             updateDirectionIndicator();
+            updateShopButtons();
             
             // Назначение обработчиков событий
             window.addEventListener('keydown', handleKeyDown);
