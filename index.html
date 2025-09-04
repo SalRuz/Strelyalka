@@ -365,8 +365,7 @@
             
             <div class="control-group">
                 <h3>Игра</h3>
-                <button id="startButton">Старт (Enter)</button>
-                <button id="pauseButton">Пауза (Q)</button>
+                <button id="startStopButton">Старт/Стоп (Q)</button>
             </div>
         </div>
         
@@ -383,11 +382,12 @@
             <p>Остерегайтесь призраков <span style="color: #9b59b6; font-weight: bold">Ø</span> - они проходят сквозь стены и дают 2 монеты!</p>
             <p>Каждые 30 секунд появляется боец <span style="color: #00bfff; font-weight: bold">B</span>, который помогает вам!</p>
             <p>Каждые 40 секунд появляется бронированный враг <span style="color: #ff4500; font-weight: bold">A</span> с 6 жизнями! Дает 3 монеты.</p>
+            <p>Каждые 40 секунд появляется спидстер <span style="color: #ff00ff; font-weight: bold">S</span> с 3 жизнями! Дает 2 монеты.</p>
             <p>Остерегайтесь мин <span style="color: #ff0000; font-weight: bold">X</span> - они наносят урон при наступлении!</p>
             <p>После убийства 50 врагов скорость всех противников увеличивается в 2 раза!</p>
             <p>Нельзя купить одно и то же оружие дважды или более слабое оружие.</p>
             <p>Уборщик <span style="color: #00ff7f; font-weight: bold">C</span> нейтрализует мины своим здоровьем!</p>
-            <p>Спидстер <span style="color: #ff00ff; font-weight: bold">S</span> - быстрый враг с 3 здоровьем!</p>
+            <p>Медик <span style="color: #ffffff; font-weight: bold">M</span> лечит бойцов!</p>
         </div>
 
         <a href="https://salruz.github.io/Code/" target="_blank" class="project-btn" style="text-decoration: none; display: inline-block; margin: 10px;">
@@ -414,6 +414,7 @@
         const WALL_CHAR = '#';
         const FIGHTER_CHAR = 'B';
         const CLEANER_CHAR = 'C';
+        const MEDIC_CHAR = 'M';
         const MINE_CHAR = 'X';
         const MAX_HEALTH = 5;
         const START_AMMO = 5;
@@ -442,8 +443,7 @@
         finalTimeElement = document.getElementById('finalTime');
         const finalKillsElement = document.getElementById('finalKills');
         const restartButton = document.getElementById('restartButton');
-        const startButton = document.getElementById('startButton');
-        const pauseButton = document.getElementById('pauseButton');
+        const startStopButton = document.getElementById('startStopButton');
         const shootButton = document.getElementById('shootButton');
         const openShopButton = document.getElementById('openShopButton');
         const buyAmmoButton = document.getElementById('buyAmmoButton');
@@ -480,6 +480,7 @@
             ghosts: [],
             fighters: [],
             cleaners: [],
+            medics: [],
             bullets: [],
             healthPacks: [],
             ammoPacks: [],
@@ -494,15 +495,17 @@
             lastHealthSpawn: 0,
             lastFighterSpawn: 0,
             lastCleanerSpawn: 0,
+            lastMedicSpawn: 0,
             lastMineSpawn: 0,
             enemySpawnInterval: 10,
             armoredEnemySpawnInterval: 40,
-            speedsterSpawnInterval: 25,
+            speedsterSpawnInterval: 40,
             ghostSpawnInterval: 20,
             ammoSpawnInterval: 30,
             healthSpawnInterval: 60,
             fighterSpawnInterval: 30,
             cleanerSpawnInterval: 60,
+            medicSpawnInterval: 45,
             mineSpawnInterval: 10,
             lastUpdate: 0,
             survivalTime: 0,
@@ -784,6 +787,12 @@
                 }
             }
             
+            for (const medic of gameState.medics) {
+                if (medic.x === x && medic.y === y) {
+                    return false;
+                }
+            }
+            
             // Проверка мин
             for (const mine of gameState.mines) {
                 if (mine.x === x && mine.y === y) {
@@ -801,6 +810,7 @@
             let closestTarget = gameState.player;
             let minDist = Math.sqrt(Math.pow(enemyX - gameState.player.x, 2) + Math.pow(enemyY - gameState.player.y, 2));
             let isFighter = false;
+            let isMedic = false;
             
             // Проверяем бойцов
             for (const fighter of gameState.fighters) {
@@ -809,10 +819,22 @@
                     minDist = dist;
                     closestTarget = fighter;
                     isFighter = true;
+                    isMedic = false;
                 }
             }
             
-            return { target: closestTarget, isFighter };
+            // Проверяем медиков
+            for (const medic of gameState.medics) {
+                const dist = Math.sqrt(Math.pow(enemyX - medic.x, 2) + Math.pow(enemyY - medic.y, 2));
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestTarget = medic;
+                    isFighter = false;
+                    isMedic = true;
+                }
+            }
+            
+            return { target: closestTarget, isFighter, isMedic };
         }
         
         // Найти ближайшую мину для уборщика
@@ -829,6 +851,22 @@
             }
             
             return closestMine;
+        }
+        
+        // Найти ближайшего бойца для медика
+        function findClosestFighter(medicX, medicY) {
+            let closestFighter = null;
+            let minDist = Infinity;
+            
+            for (const fighter of gameState.fighters) {
+                const dist = Math.sqrt(Math.pow(medicX - fighter.x, 2) + Math.pow(medicY - fighter.y, 2));
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestFighter = fighter;
+                }
+            }
+            
+            return closestFighter;
         }
         
         // Спавн врага
@@ -909,7 +947,7 @@
                     pathUpdateTime: 0,
                     hits: 0,
                     health: 3,
-                    moveSpeed: 0.1 * gameState.enemySpeedMultiplier // В 5 раз быстрее обычного
+                    moveSpeed: 0.125 * gameState.enemySpeedMultiplier // В 4 раза быстрее обычного
                 });
             }
         }
@@ -963,7 +1001,8 @@
                     path: [],
                     pathUpdateTime: 0,
                     health: 3,
-                    target: null
+                    target: null,
+                    isShooting: false
                 });
             }
         }
@@ -991,6 +1030,34 @@
                     pathUpdateTime: 0,
                     health: 10,
                     targetMine: null
+                });
+            }
+        }
+        
+        // Спавн медика
+        function spawnMedic() {
+            let x, y;
+            let attempts = 0;
+            
+            do {
+                x = Math.floor(Math.random() * (GRID_WIDTH - 4)) + 2;
+                y = Math.floor(Math.random() * (GRID_HEIGHT - 4)) + 2;
+                attempts++;
+            } while ((gameState.maze[y][x] === 1 || 
+                     Math.abs(x - gameState.player.x) < 10 || 
+                     Math.abs(y - gameState.player.y) < 10) && 
+                     attempts < 100);
+            
+            if (attempts < 100) {
+                gameState.medics.push({
+                    x: x,
+                    y: y,
+                    lastMove: 0,
+                    lastHeal: 0,
+                    path: [],
+                    pathUpdateTime: 0,
+                    health: 3,
+                    targetFighter: null
                 });
             }
         }
@@ -1079,7 +1146,8 @@
                         path: [],
                         pathUpdateTime: 0,
                         health: 3,
-                        target: null
+                        target: null,
+                        isShooting: false
                     });
                 }
             }
@@ -1087,6 +1155,12 @@
             // Визуальный эффект активации чита
             gameState.player.health = MAX_HEALTH;
             updateHealthDisplay();
+        }
+        
+        // Активация чит-кода MOREMONEY
+        function activateMoreMoneyCheat() {
+            gameState.coinsCount += 100;
+            updateCoinsDisplay();
         }
         
         // Движение врагов с улучшенным ИИ
@@ -1099,7 +1173,7 @@
                     enemy.lastMove = 0;
                     
                     // Находим ближайшую цель
-                    const { target, isFighter } = findClosestTarget(enemy.x, enemy.y);
+                    const { target, isFighter, isMedic } = findClosestTarget(enemy.x, enemy.y);
                     
                     if (enemy.pathUpdateTime >= 2 || enemy.path.length === 0) {
                         enemy.pathUpdateTime = 0;
@@ -1129,6 +1203,21 @@
                                 break;
                             }
                         }
+                    } else if (isMedic) {
+                        // Атакуем медика
+                        for (let i = gameState.medics.length - 1; i >= 0; i--) {
+                            const medic = gameState.medics[i];
+                            if (enemy.x === medic.x && enemy.y === medic.y) {
+                                medic.health -= 1;
+                                if (medic.health <= 0) {
+                                    gameState.medics.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                enemy.x += Math.sign(enemy.x - medic.x);
+                                enemy.y += Math.sign(enemy.y - medic.y);
+                                break;
+                            }
+                        }
                     } else if (enemy.x === gameState.player.x && enemy.y === gameState.player.y) {
                         playerHit();
                     }
@@ -1146,7 +1235,7 @@
                     armoredEnemy.lastMove = 0;
                     
                     // Находим ближайшую цель
-                    const { target, isFighter } = findClosestTarget(armoredEnemy.x, armoredEnemy.y);
+                    const { target, isFighter, isMedic } = findClosestTarget(armoredEnemy.x, armoredEnemy.y);
                     
                     if (armoredEnemy.pathUpdateTime >= 2 || armoredEnemy.path.length === 0) {
                         armoredEnemy.pathUpdateTime = 0;
@@ -1168,11 +1257,26 @@
                             if (armoredEnemy.x === fighter.x && armoredEnemy.y === fighter.y) {
                                 fighter.health -= 1;
                                 if (fighter.health <= 0) {
-                                    gameState.fighters.splice(i, 1);
+                                    gameState.fifters.splice(i, 1);
                                 }
                                 // Отскакиваем после атаки
                                 armoredEnemy.x += Math.sign(armoredEnemy.x - fighter.x);
                                 armoredEnemy.y += Math.sign(armoredEnemy.y - fighter.y);
+                                break;
+                            }
+                        }
+                    } else if (isMedic) {
+                        // Атакуем медика
+                        for (let i = gameState.medics.length - 1; i >= 0; i--) {
+                            const medic = gameState.medics[i];
+                            if (armoredEnemy.x === medic.x && armoredEnemy.y === medic.y) {
+                                medic.health -= 1;
+                                if (medic.health <= 0) {
+                                    gameState.medics.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                armoredEnemy.x += Math.sign(armoredEnemy.x - medic.x);
+                                armoredEnemy.y += Math.sign(armoredEnemy.y - medic.y);
                                 break;
                             }
                         }
@@ -1193,7 +1297,7 @@
                     speedster.lastMove = 0;
                     
                     // Находим ближайшую цель
-                    const { target, isFighter } = findClosestTarget(speedster.x, speedster.y);
+                    const { target, isFighter, isMedic } = findClosestTarget(speedster.x, speedster.y);
                     
                     if (speedster.pathUpdateTime >= 1 || speedster.path.length === 0) {
                         speedster.pathUpdateTime = 0;
@@ -1223,6 +1327,21 @@
                                 break;
                             }
                         }
+                    } else if (isMedic) {
+                        // Атакуем медика
+                        for (let i = gameState.medics.length - 1; i >= 0; i--) {
+                            const medic = gameState.medics[i];
+                            if (speedster.x === medic.x && speedster.y === medic.y) {
+                                medic.health -= 1;
+                                if (medic.health <= 0) {
+                                    gameState.medics.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                speedster.x += Math.sign(speedster.x - medic.x);
+                                speedster.y += Math.sign(speedster.y - medic.y);
+                                break;
+                            }
+                        }
                     } else if (speedster.x === gameState.player.x && speedster.y === gameState.player.y) {
                         playerHit();
                     }
@@ -1240,7 +1359,7 @@
                     ghost.lastMove = 0;
                     
                     // Находим ближайшую цель
-                    const { target, isFighter } = findClosestTarget(ghost.x, ghost.y);
+                    const { target, isFighter, isMedic } = findClosestTarget(ghost.x, ghost.y);
                     
                     if (ghost.pathUpdateTime >= 3 || ghost.path.length === 0) {
                         ghost.pathUpdateTime = 0;
@@ -1267,6 +1386,21 @@
                                 // Отскакиваем после атаки
                                 ghost.x += Math.sign(ghost.x - fighter.x);
                                 ghost.y += Math.sign(ghost.y - fighter.y);
+                                break;
+                            }
+                        }
+                    } else if (isMedic) {
+                        // Атакуем медика
+                        for (let i = gameState.medics.length - 1; i >= 0; i--) {
+                            const medic = gameState.medics[i];
+                            if (ghost.x === medic.x && ghost.y === medic.y) {
+                                medic.health -= 1;
+                                if (medic.health <= 0) {
+                                    gameState.medics.splice(i, 1);
+                                }
+                                // Отскакиваем после атаки
+                                ghost.x += Math.sign(ghost.x - medic.x);
+                                ghost.y += Math.sign(ghost.y - medic.y);
                                 break;
                             }
                         }
@@ -1298,23 +1432,33 @@
                 
                 fighter.target = closestEnemy;
                 
-                if (fighter.lastMove >= 0.5) {
-                    fighter.lastMove = 0;
+                // Если враг близко, останавливаемся и стреляем
+                if (fighter.target && minDist < 8) {
+                    fighter.isShooting = true;
                     
-                    if (fighter.target && minDist < 10) {
-                        // Двигаться к цели
-                        if (fighter.pathUpdateTime >= 2 || fighter.path.length === 0) {
-                            fighter.pathUpdateTime = 0;
-                            fighter.path = findPath(fighter.x, fighter.y, fighter.target.x, fighter.target.y);
-                        }
+                    // Стрельба
+                    if (fighter.lastShoot >= 1) {
+                        fighter.lastShoot = 0;
                         
-                        if (fighter.path && fighter.path.length > 1) {
-                            const nextStep = fighter.path[1];
-                            fighter.x = nextStep.x;
-                            fighter.y = nextStep.y;
-                            fighter.path.shift();
-                        }
-                    } else {
+                        const dx = Math.sign(fighter.target.x - fighter.x);
+                        const dy = Math.sign(fighter.target.y - fighter.y);
+                        
+                        gameState.bullets.push({
+                            x: fighter.x + 0.5,
+                            y: fighter.y + 0.5,
+                            dx: dx,
+                            dy: dy,
+                            speed: 0.2,
+                            lifetime: 2,
+                            fromFighter: true
+                        });
+                    }
+                } else {
+                    fighter.isShooting = false;
+                    
+                    if (fighter.lastMove >= 0.5) {
+                        fighter.lastMove = 0;
+                        
                         // Случайное движение, если нет врагов поблизости
                         const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
                         const dir = directions[Math.floor(Math.random() * directions.length)];
@@ -1328,36 +1472,18 @@
                             fighter.y = newY;
                         }
                     }
-                    
-                    // Проверка мин
-                    for (const mine of gameState.mines) {
-                        if (mine.x === fighter.x && mine.y === fighter.y) {
-                            fighter.health -= 1; // Урон от мины
-                            gameState.mines = gameState.mines.filter(m => m.x !== mine.x || m.y !== mine.y);
-                            if (fighter.health <= 0) {
-                                gameState.fighters = gameState.fighters.filter(f => f !== fighter);
-                            }
-                            break;
-                        }
-                    }
                 }
                 
-                // Стрельба
-                if (fighter.lastShoot >= 1 && fighter.target && minDist < 8) {
-                    fighter.lastShoot = 0;
-                    
-                    const dx = Math.sign(fighter.target.x - fighter.x);
-                    const dy = Math.sign(fighter.target.y - fighter.y);
-                    
-                    gameState.bullets.push({
-                        x: fighter.x + 0.5,
-                        y: fighter.y + 0.5,
-                        dx: dx,
-                        dy: dy,
-                        speed: 0.2,
-                        lifetime: 2,
-                        fromFighter: true
-                    });
+                // Проверка мин
+                for (const mine of gameState.mines) {
+                    if (mine.x === fighter.x && mine.y === fighter.y) {
+                        fighter.health -= 1; // Урон от мины
+                        gameState.mines = gameState.mines.filter(m => m.x !== mine.x || m.y !== mine.y);
+                        if (fighter.health <= 0) {
+                            gameState.fighters = gameState.fighters.filter(f => f !== fighter);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -1411,6 +1537,72 @@
                             cleaner.x = newX;
                             cleaner.y = newY;
                         }
+                    }
+                }
+            }
+        }
+        
+        // Движение медиков
+        function moveMedics(deltaTime) {
+            for (const medic of gameState.medics) {
+                medic.lastMove += deltaTime;
+                medic.lastHeal += deltaTime;
+                medic.pathUpdateTime += deltaTime;
+                
+                // Находим ближайшего бойца
+                medic.targetFighter = findClosestFighter(medic.x, medic.y);
+                
+                if (medic.lastMove >= 0.5) {
+                    medic.lastMove = 0;
+                    
+                    if (medic.targetFighter) {
+                        // Двигаться к бойцу
+                        if (medic.pathUpdateTime >= 2 || medic.path.length === 0) {
+                            medic.pathUpdateTime = 0;
+                            medic.path = findPath(medic.x, medic.y, medic.targetFighter.x, medic.targetFighter.y);
+                        }
+                        
+                        if (medic.path && medic.path.length > 1) {
+                            const nextStep = medic.path[1];
+                            medic.x = nextStep.x;
+                            medic.y = nextStep.y;
+                            medic.path.shift();
+                        }
+                        
+                        // Лечение бойца
+                        if (Math.abs(medic.x - medic.targetFighter.x) <= 1 && 
+                            Math.abs(medic.y - medic.targetFighter.y) <= 1 &&
+                            medic.lastHeal >= 2) {
+                            medic.lastHeal = 0;
+                            if (medic.targetFighter.health < 3) {
+                                medic.targetFighter.health += 1;
+                            }
+                        }
+                    } else {
+                        // Случайное движение, если нет бойцов
+                        const directions = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+                        const dir = directions[Math.floor(Math.random() * directions.length)];
+                        
+                        const newX = medic.x + dir[0];
+                        const newY = medic.y + dir[1];
+                        
+                        if (newX >= 0 && newX < GRID_WIDTH && newY >= 0 && newY < GRID_HEIGHT && 
+                            gameState.maze[newY][newX] === 0) {
+                            medic.x = newX;
+                            medic.y = newY;
+                        }
+                    }
+                }
+                
+                // Проверка мин
+                for (const mine of gameState.mines) {
+                    if (mine.x === medic.x && mine.y === medic.y) {
+                        medic.health -= 1; // Урон от мины
+                        gameState.mines = gameState.mines.filter(m => m.x !== mine.x || m.y !== mine.y);
+                        if (medic.health <= 0) {
+                            gameState.medics = gameState.medics.filter(m => m !== medic);
+                        }
+                        break;
                     }
                 }
             }
@@ -1562,6 +1754,22 @@
                         break;
                     }
                 }
+                
+                // Проверка попадания в медиков (дружественный огонь)
+                for (let j = gameState.medics.length - 1; j >= 0; j--) {
+                    const medic = gameState.medics[j];
+                    
+                    if (Math.floor(bullet.x) === medic.x && Math.floor(bullet.y) === medic.y && !bullet.fromFighter) {
+                        medic.health -= 1;
+                        
+                        if (medic.health <= 0) {
+                            gameState.medics.splice(j, 1);
+                        }
+                        
+                        gameState.bullets.splice(i, 1);
+                        break;
+                    }
+                }
             }
         }
         
@@ -1629,7 +1837,7 @@
                     armoredEnemy.moveSpeed = 0.5 * gameState.enemySpeedMultiplier;
                 }
                 for (const speedster of gameState.speedsters) {
-                    speedster.moveSpeed = 0.1 * gameState.enemySpeedMultiplier;
+                    speedster.moveSpeed = 0.125 * gameState.enemySpeedMultiplier;
                 }
                 for (const ghost of gameState.ghosts) {
                     ghost.moveSpeed = 0.4 * gameState.enemySpeedMultiplier;
@@ -1705,7 +1913,7 @@
             }
         }
         
-        // Покупка оружия
+        // Покупка оружие
         function buyWeapon(weaponType) {
             // Нельзя купить то же самое или более слабое оружие
             if (gameState.coinsCount >= weaponType.cost && 
@@ -1769,6 +1977,12 @@
             // Проверяем, совпадает ли введенный код с MYLP
             if (cheatCode === 'MYLP') {
                 activateCheatCode();
+                cheatCode = ''; // Сбрасываем код после активации
+            }
+            
+            // Проверяем, совпадает ли введенный код с MOREMONEY
+            if (cheatCode === 'MOREMONEY') {
+                activateMoreMoneyCheat();
                 cheatCode = ''; // Сбрасываем код после активации
             }
         }
@@ -1956,7 +2170,7 @@
             // Отрисовка бойцов
             for (const fighter of gameState.fighters) {
                 if (fighter.x >= startX && fighter.x < endX && fighter.y >= startY && fighter.y < endY) {
-                    ctx.fillStyle = '#00bfff';
+                    ctx.fillStyle = fighter.isShooting ? '#0080ff' : '#00bfff';
                     ctx.fillRect(toScreenX(fighter.x), toScreenY(fighter.y), CELL_SIZE, CELL_SIZE);
                     
                     ctx.font = '16px Arial';
@@ -1986,6 +2200,24 @@
                     ctx.fillStyle = 'white';
                     ctx.font = '10px Arial';
                     ctx.fillText(`${cleaner.health}/10`, toScreenX(cleaner.x) + CELL_SIZE/2, toScreenY(cleaner.y) + CELL_SIZE - 3);
+                }
+            }
+            
+            // Отрисовка медиков
+            for (const medic of gameState.medics) {
+                if (medic.x >= startX && medic.x < endX && medic.y >= startY && medic.y < endY) {
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(toScreenX(medic.x), toScreenY(medic.y), CELL_SIZE, CELL_SIZE);
+                    
+                    ctx.font = '16px Arial';
+                    ctx.fillStyle = 'black';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(MEDIC_CHAR, toScreenX(medic.x) + CELL_SIZE/2, toScreenY(medic.y) + CELL_SIZE/2);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px Arial';
+                    ctx.fillText(`${medic.health}/3`, toScreenX(medic.x) + CELL_SIZE/2, toScreenY(medic.y) + CELL_SIZE - 3);
                 }
             }
             
@@ -2052,6 +2284,13 @@
                     gameState.lastCleanerSpawn = 0;
                 }
                 
+                // Спавн медиков
+                gameState.lastMedicSpawn += deltaTime;
+                if (gameState.lastMedicSpawn >= gameState.medicSpawnInterval) {
+                    spawnMedic();
+                    gameState.lastMedicSpawn = 0;
+                }
+                
                 // Спавн мин
                 gameState.lastMineSpawn += deltaTime;
                 if (gameState.lastMineSpawn >= gameState.mineSpawnInterval) {
@@ -2086,10 +2325,13 @@
                 moveGhosts(deltaTime);
                 
                 // Движение бойцов
-                moveFighters(deltaTime);
+                moveFifters(deltaTime);
                 
                 // Движение уборщиков
                 moveCleaners(deltaTime);
+                
+                // Движение медиков
+                moveMedics(deltaTime);
                 
                 // Движение пуль
                 moveBullets(deltaTime);
@@ -2170,23 +2412,23 @@
                 case 'E':
                     toggleShop();
                     break;
-                case 'Enter':
-                    e.preventDefault();
-                    startGame();
-                    break;
                 case 'q':
                 case 'Q':
                     e.preventDefault();
-                    pauseGame();
+                    toggleStartStop();
                     break;
                 case 'm':
                 case 'M':
+                case 'o':
+                case 'O':
+                case 'r':
+                case 'R':
+                case 'e':
+                case 'E':
                 case 'y':
                 case 'Y':
-                case 'l':
-                case 'L':
-                case 'p':
-                case 'P':
+                case 'n':
+                case 'N':
                     handleCheatCode(e.key.toUpperCase());
                     break;
             }
@@ -2201,6 +2443,23 @@
             }
         }
         
+        // Переключение старта/стопа
+        function toggleStartStop() {
+            if (gameState.isRunning) {
+                gameState.isRunning = false;
+                startStopButton.textContent = "Старт (Q)";
+            } else {
+                if (gameState.gameOver) {
+                    restartGame();
+                } else {
+                    gameState.isRunning = true;
+                    gameState.lastUpdate = 0;
+                    requestAnimationFrame(update);
+                    startStopButton.textContent = "Стоп (Q)";
+                }
+            }
+        }
+        
         // Конец игры
         function endGame() {
             gameState.isRunning = false;
@@ -2210,6 +2469,7 @@
             finalTimeElement.textContent = Math.floor(gameState.survivalTime);
             finalKillsElement.textContent = gameState.kills;
             gameOverElement.style.display = 'block';
+            startStopButton.textContent = "Старт (Q)";
         }
         
         // Перезапуск игры
@@ -2228,6 +2488,7 @@
             gameState.ghosts = [];
             gameState.fighters = [];
             gameState.cleaners = [];
+            gameState.medics = [];
             gameState.bullets = [];
             gameState.healthPacks = [];
             gameState.ammoPacks = [];
@@ -2242,6 +2503,7 @@
             gameState.lastHealthSpawn = 0;
             gameState.lastFighterSpawn = 0;
             gameState.lastCleanerSpawn = 0;
+            gameState.lastMedicSpawn = 0;
             gameState.lastMineSpawn = 0;
             gameState.survivalTime = 0;
             gameState.score = 0;
@@ -2269,22 +2531,11 @@
             updateDirectionIndicator();
             gameOverElement.style.display = 'none';
             shopElement.style.display = 'none';
+            startStopButton.textContent = "Старт (Q)";
             
-            startGame();
-        }
-        
-        // Начало игры
-        function startGame() {
-            if (!gameState.isRunning) {
-                gameState.isRunning = true;
-                gameState.lastUpdate = 0;
-                requestAnimationFrame(update);
-            }
-        }
-        
-        // Пауза игры
-        function pauseGame() {
-            gameState.isRunning = false;
+            gameState.isRunning = true;
+            gameState.lastUpdate = 0;
+            requestAnimationFrame(update);
         }
         
         // Инициализация игры
@@ -2302,8 +2553,7 @@
             window.addEventListener('keydown', handleKeyDown);
             window.addEventListener('wheel', function() {}); // Включение скроллинга
             restartButton.addEventListener('click', restartGame);
-            startButton.addEventListener('click', startGame);
-            pauseButton.addEventListener('click', pauseGame);
+            startStopButton.addEventListener('click', toggleStartStop);
             shootButton.addEventListener('click', shoot);
             openShopButton.addEventListener('click', toggleShop);
             closeShopButton.addEventListener('click', toggleShop);
