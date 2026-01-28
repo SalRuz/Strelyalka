@@ -625,8 +625,7 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "###DESCRIPTION: описание\n"
         "###CODE:\n"
         "async def execute(update, context, args):\n"
-        "    return 'Результат'\n\n"
-        "#если скрипт требует создания базы данных, используйте SQlite"
+        "    return 'Результат'\n"
         "```\n\n"
         "2️⃣ *Файлом .txt* с тем же форматом\n\n"
         "📌 Можно отправлять частями!\n"
@@ -743,6 +742,7 @@ def parse_script_text(text):
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка загруженных документов (.txt файлов)"""
     user_id = update.effective_user.id
+    chat_id = str(update.effective_chat.id)
     document = update.message.document
     
     if not document:
@@ -753,19 +753,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not file_name.endswith('.txt'):
         return False
     
-    # Проверяем, ожидаем ли скрипт
+    # Проверяем права доступа
     if user_id not in pending_scripts and user_id not in editing_scripts:
-        # Может быть новый скрипт без /addscript
         if not await check_script_permission(update, context):
-            return False
-        
-        pending_scripts[user_id] = {
-            'chat_id': str(update.effective_chat.id),
-            'code': '',
-            'command': None,
-            'description': 'Без описания',
-            'stage': 'waiting_first'
-        }
+            await update.message.reply_text(
+                "❌ У вас нет прав на создание скриптов в этом чате.",
+                parse_mode='Markdown'
+            )
+            return True
     
     try:
         # Скачиваем файл
@@ -773,46 +768,101 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_content = await file.download_as_bytearray()
         text = file_content.decode('utf-8')
         
-        await update.message.reply_text(f"📄 Файл `{file_name}` получен ({len(text)} символов)")
+        await update.message.reply_text(f"📄 Файл `{file_name}` получен ({len(text)} символов)", parse_mode='Markdown')
         
-        # Обрабатываем как текст
+        # Парсим скрипт
+        command, description, code = parse_script_text(text)
+        
+        # Если код не распарсился через ###CODE:, используем весь текст
+        if not code.strip():
+            code = text
+        
+        # Режим редактирования
         if user_id in editing_scripts:
-            # Режим редактирования
-            editing = editing_scripts[user_id]
-            command, description, code = parse_script_text(text)
-            editing['code'] = code if code else text
+            editing = editing_scripts.pop(user_id)
+            target_command = editing['command']
+            target_chat_id = editing['chat_id']
+            
             if description != "Без описания":
-                editing['new_description'] = description
-            editing['stage'] = 'waiting_more'
-            
-            await update.message.reply_text(
-                f"✅ Код из файла получен!\n\n"
-                f"❓ Есть ещё код? Отправьте или напишите `готово`",
-                parse_mode='Markdown'
-            )
-        else:
-            # Режим добавления
-            pending = pending_scripts[user_id]
-            command, description, code = parse_script_text(text)
-            
-            if command:
-                pending['command'] = command
-            if description != "Без описания":
-                pending['description'] = description
-            
-            if pending['stage'] == 'waiting_first':
-                pending['code'] = code if code else text
+                new_description = description
             else:
-                pending['code'] += '\n' + (code if code else text)
+                script_info = get_script_from_db(target_chat_id, target_command)
+                new_description = script_info['description'] if script_info else 'Без описания'
             
-            pending['stage'] = 'waiting_more'
+            # Проверяем наличие функции execute
+            if 'async def execute' not in code and 'def execute' not in code:
+                await update.message.reply_text("❌ Не найдена функция execute! Файл не сохранён.")
+                return True
+            
+            # Сохраняем
+            script_info = get_script_from_db(target_chat_id, target_command)
+            author = script_info['author'] if script_info else (update.effective_user.username or str(user_id))
+            
+            save_script_to_db(target_chat_id, target_command, new_description, code, author, user_id)
+            
+            # Обновляем кэш
+            if target_chat_id in scripts_registry and target_command in scripts_registry[target_chat_id]:
+                scripts_registry[target_chat_id][target_command]['code'] = code
+                scripts_registry[target_chat_id][target_command]['description'] = new_description
             
             await update.message.reply_text(
-                f"✅ Код из файла получен!\n\n"
-                f"📌 Команда: `{pending['command'] or 'не указана'}`\n\n"
-                f"❓ Есть ещё код? Отправьте или напишите `готово`",
+                f"✅ *Скрипт обновлён из файла!*\n\n"
+                f"📌 Команда: `{target_command}`\n"
+                f"📦 Размер: {len(code)} символов",
                 parse_mode='Markdown'
             )
+            return True
+        
+        # Режим добавления нового скрипта
+        # Очищаем pending если был
+        if user_id in pending_scripts:
+            pending = pending_scripts.pop(user_id)
+            # Берём команду из pending если в файле не указана
+            if not command and pending.get('command'):
+                command = pending['command']
+            if description == "Без описания" and pending.get('description') != "Без описания":
+                description = pending['description']
+            chat_id = pending['chat_id']
+        
+        # Проверяем обязательные поля
+        if not command:
+            await update.message.reply_text(
+                "❌ Не указана команда!\n\n"
+                "Добавьте в начало файла:\n"
+                "`###COMMAND: название`",
+                parse_mode='Markdown'
+            )
+            return True
+        
+        if 'async def execute' not in code and 'def execute' not in code:
+            await update.message.reply_text("❌ Не найдена функция execute! Файл не сохранён.")
+            return True
+        
+        # Сохраняем скрипт
+        author = update.effective_user.username or str(user_id)
+        save_script_to_db(chat_id, command, description, code, author, user_id)
+        
+        # Обновляем кэш
+        if chat_id not in scripts_registry:
+            scripts_registry[chat_id] = {}
+        
+        scripts_registry[chat_id][command] = {
+            'description': description,
+            'code': code,
+            'author': author,
+            'created': datetime.now().isoformat()
+        }
+        
+        save_user(user_id, update.effective_user.username, update.effective_user.first_name)
+        
+        await update.message.reply_text(
+            f"✅ *Скрипт сохранён из файла!*\n\n"
+            f"📌 Команда: `{command}`\n"
+            f"📝 Описание: {description}\n"
+            f"📦 Размер: {len(code)} символов\n\n"
+            f"Используйте `{command}` в этом чате!",
+            parse_mode='Markdown'
+        )
         
         return True
         
