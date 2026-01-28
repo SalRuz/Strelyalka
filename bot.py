@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import asyncio
+import json
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from datetime import datetime
@@ -8,6 +9,7 @@ from pathlib import Path
 
 # Конфигурация
 BOT_TOKEN = "8512207770:AAEKLtYEph7gleybGhF2lc7Gwq82Kj1yedM"
+DEVELOPER_ID = 1170970828  # ID разработчика для /dbinfo
 
 # === ИНИЦИАЛИЗАЦИЯ ДИРЕКТОРИИ И БД ===
 
@@ -28,6 +30,7 @@ def init_database():
             description TEXT DEFAULT 'Без описания',
             code TEXT NOT NULL,
             author TEXT,
+            author_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(chat_id, command)
@@ -57,6 +60,18 @@ def init_database():
         )
     ''')
     
+    # Таблица настроек чатов (права доступа)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS chat_settings (
+            chat_id TEXT PRIMARY KEY,
+            creator_id INTEGER,
+            access_mode TEXT DEFAULT 'creator',
+            allowed_users TEXT DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     print(f"✅ База данных инициализирована: {DB_PATH.absolute()}")
@@ -69,7 +84,6 @@ def load_scripts_registry():
     """Загрузка реестра скриптов из БД"""
     global scripts_registry
     
-    # Инициализируем БД при загрузке данных
     init_database()
     
     registry = {}
@@ -96,14 +110,162 @@ def load_scripts_registry():
     
     return registry
 
-def save_script_to_db(chat_id, command, description, code, author):
+# === ФУНКЦИИ ДЛЯ РАБОТЫ С ПРАВАМИ ДОСТУПА ===
+
+def get_chat_settings(chat_id):
+    """Получить настройки чата"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT creator_id, access_mode, allowed_users FROM chat_settings WHERE chat_id = ?", (str(chat_id),))
+    row = cursor.fetchone()
+    conn.close()
+    
+    if row:
+        return {
+            'creator_id': row[0],
+            'access_mode': row[1],
+            'allowed_users': json.loads(row[2]) if row[2] else []
+        }
+    return None
+
+def save_chat_settings(chat_id, creator_id, access_mode='creator', allowed_users=None):
+    """Сохранить настройки чата"""
+    if allowed_users is None:
+        allowed_users = []
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT OR REPLACE INTO chat_settings (chat_id, creator_id, access_mode, allowed_users, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (str(chat_id), creator_id, access_mode, json.dumps(allowed_users)))
+    conn.commit()
+    conn.close()
+
+def add_allowed_user(chat_id, user_id):
+    """Добавить пользователя в список разрешённых"""
+    settings = get_chat_settings(chat_id)
+    if settings:
+        allowed = settings['allowed_users']
+        if user_id not in allowed:
+            allowed.append(user_id)
+            save_chat_settings(chat_id, settings['creator_id'], settings['access_mode'], allowed)
+            return True
+    return False
+
+def remove_allowed_user(chat_id, user_id):
+    """Удалить пользователя из списка разрешённых"""
+    settings = get_chat_settings(chat_id)
+    if settings:
+        allowed = settings['allowed_users']
+        if user_id in allowed:
+            allowed.remove(user_id)
+            save_chat_settings(chat_id, settings['creator_id'], settings['access_mode'], allowed)
+            return True
+    return False
+
+async def check_script_permission(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверить, имеет ли пользователь право на создание/редактирование скриптов"""
+    user_id = update.effective_user.id
+    chat_id = str(update.effective_chat.id)
+    chat_type = update.effective_chat.type
+    
+    # В личных сообщениях - всегда разрешено
+    if chat_type == 'private':
+        return True
+    
+    # Разработчик имеет полный доступ
+    if user_id == DEVELOPER_ID:
+        return True
+    
+    # Получаем настройки чата
+    settings = get_chat_settings(chat_id)
+    
+    # Если настроек нет - создаём, определяя создателя чата
+    if not settings:
+        try:
+            chat_admins = await context.bot.get_chat_administrators(chat_id)
+            creator_id = None
+            for admin in chat_admins:
+                if admin.status == 'creator':
+                    creator_id = admin.user.id
+                    break
+            
+            if creator_id:
+                save_chat_settings(chat_id, creator_id, 'creator', [])
+                settings = {'creator_id': creator_id, 'access_mode': 'creator', 'allowed_users': []}
+            else:
+                # Не удалось определить создателя - разрешаем всем админам
+                save_chat_settings(chat_id, user_id, 'admins', [])
+                settings = {'creator_id': user_id, 'access_mode': 'admins', 'allowed_users': []}
+        except Exception as e:
+            print(f"Ошибка получения админов: {e}")
+            return False
+    
+    access_mode = settings['access_mode']
+    creator_id = settings['creator_id']
+    allowed_users = settings['allowed_users']
+    
+    # Создатель всегда имеет доступ
+    if user_id == creator_id:
+        return True
+    
+    # Проверяем режим доступа
+    if access_mode == 'creator':
+        return False
+    
+    elif access_mode == 'admins':
+        try:
+            chat_admins = await context.bot.get_chat_administrators(chat_id)
+            admin_ids = [admin.user.id for admin in chat_admins]
+            return user_id in admin_ids
+        except:
+            return False
+    
+    elif access_mode == 'selected':
+        return user_id in allowed_users
+    
+    elif access_mode == 'everyone':
+        return True
+    
+    return False
+
+async def is_chat_creator(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Проверить, является ли пользователь создателем чата"""
+    user_id = update.effective_user.id
+    chat_id = str(update.effective_chat.id)
+    chat_type = update.effective_chat.type
+    
+    if chat_type == 'private':
+        return True
+    
+    if user_id == DEVELOPER_ID:
+        return True
+    
+    settings = get_chat_settings(chat_id)
+    if settings and settings['creator_id'] == user_id:
+        return True
+    
+    try:
+        chat_admins = await context.bot.get_chat_administrators(chat_id)
+        for admin in chat_admins:
+            if admin.status == 'creator' and admin.user.id == user_id:
+                return True
+    except:
+        pass
+    
+    return False
+
+# === ФУНКЦИИ ДЛЯ РАБОТЫ СО СКРИПТАМИ ===
+
+def save_script_to_db(chat_id, command, description, code, author, author_id):
     """Сохранение скрипта в БД"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT OR REPLACE INTO scripts (chat_id, command, description, code, author, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (str(chat_id), command, description, code, author))
+        INSERT OR REPLACE INTO scripts (chat_id, command, description, code, author, author_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (str(chat_id), command, description, code, author, author_id))
     conn.commit()
     conn.close()
 
@@ -195,6 +357,9 @@ def get_db_stats():
         cursor.execute("SELECT COUNT(DISTINCT chat_id) FROM scripts")
         chats_count = cursor.fetchone()[0]
         
+        cursor.execute("SELECT COUNT(*) FROM chat_settings")
+        settings_count = cursor.fetchone()[0]
+        
         conn.close()
         
         return {
@@ -202,41 +367,199 @@ def get_db_stats():
             'users': users_count,
             'logs': logs_count,
             'chats': chats_count,
-            'db_path': str(DB_PATH),
+            'settings': settings_count,
+            'db_path': str(DB_PATH.absolute()),
             'db_size': DB_PATH.stat().st_size if DB_PATH.exists() else 0
         }
     except Exception as e:
         print(f"Ошибка получения статистики: {e}")
         return None
 
-# Глобальный реестр скриптов (кэш из БД, загружается в main())
+# Глобальный реестр скриптов
 scripts_registry = {}
 
-# Состояния для многочастной загрузки скриптов
+# Состояния для загрузки скриптов
 pending_scripts = {}
 
 # Состояния редактирования
 editing_scripts = {}
 
+# === КОМАНДЫ БОТА ===
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Приветственное сообщение"""
+    chat_type = update.effective_chat.type
+    
+    if chat_type == 'private':
+        await update.message.reply_text(
+            "🤖 *Привет! Я бот с кастомными скриптами!*\n\n"
+            "📌 *Команды:*\n"
+            "`/addscript` - Добавить скрипт\n"
+            "`/listscripts` - Список скриптов\n"
+            "`/viewscript` - Посмотреть код\n"
+            "`/editscript` - Редактировать\n"
+            "`/deletescript` - Удалить\n"
+            "`/help` - Помощь\n\n"
+            "📄 Можно отправить скрипт как .txt файл!",
+            parse_mode='Markdown'
+        )
+    else:
+        await update.message.reply_text(
+            "🤖 *Бот активирован в чате!*\n\n"
+            "📌 *Команды:*\n"
+            "`/addscript` - Добавить скрипт\n"
+            "`/listscripts` - Список скриптов\n"
+            "`/settings` - Настройки доступа (создатель)\n"
+            "`/help` - Помощь\n\n"
+            "🔐 По умолчанию скрипты может создавать только создатель чата.",
+            parse_mode='Markdown'
+        )
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Настройки доступа к созданию скриптов"""
+    user_id = update.effective_user.id
+    chat_id = str(update.effective_chat.id)
+    chat_type = update.effective_chat.type
+    
+    if chat_type == 'private':
+        await update.message.reply_text("⚙️ Настройки доступа работают только в группах.")
+        return
+    
+    # Проверяем, является ли пользователь создателем
+    if not await is_chat_creator(update, context):
+        await update.message.reply_text("❌ Только создатель чата может менять настройки!")
+        return
+    
+    settings = get_chat_settings(chat_id)
+    if not settings:
+        save_chat_settings(chat_id, user_id, 'creator', [])
+        settings = {'creator_id': user_id, 'access_mode': 'creator', 'allowed_users': []}
+    
+    # Если есть аргумент - меняем режим
+    if context.args:
+        new_mode = context.args[0].lower()
+        if new_mode in ['creator', 'admins', 'selected', 'everyone']:
+            save_chat_settings(chat_id, settings['creator_id'], new_mode, settings['allowed_users'])
+            
+            mode_names = {
+                'creator': '👑 Только создатель',
+                'admins': '👮 Все администраторы',
+                'selected': '👥 Выбранные пользователи',
+                'everyone': '🌍 Все участники'
+            }
+            
+            await update.message.reply_text(
+                f"✅ Режим доступа изменён!\n\n"
+                f"🔐 Новый режим: *{mode_names[new_mode]}*",
+                parse_mode='Markdown'
+            )
+            return
+    
+    # Показываем текущие настройки
+    mode_names = {
+        'creator': '👑 Только создатель',
+        'admins': '👮 Все администраторы',
+        'selected': '👥 Выбранные пользователи',
+        'everyone': '🌍 Все участники'
+    }
+    
+    allowed_text = ""
+    if settings['allowed_users']:
+        allowed_text = f"\n👥 Разрешённые ID: {settings['allowed_users']}"
+    
     await update.message.reply_text(
-        "🤖 *Привет! Я бот с кастомными скриптами!*\n\n"
-        "📌 *Доступные команды:*\n"
-        "`/addscript` - Добавить новый скрипт\n"
-        "`/listscripts` - Список скриптов чата\n"
-        "`/viewscript <команда>` - Посмотреть код\n"
-        "`/editscript <команда>` - Редактировать скрипт\n"
-        "`/deletescript <команда>` - Удалить скрипт\n"
-        "`/dbinfo` - Информация о базе данных\n"
-        "`/cancel` - Отменить текущее действие\n"
-        "`/help` - Помощь\n\n"
-        "💡 Вы можете создавать свои команды!",
+        f"⚙️ *Настройки доступа*\n\n"
+        f"🔐 Текущий режим: *{mode_names.get(settings['access_mode'], settings['access_mode'])}*"
+        f"{allowed_text}\n\n"
+        f"📌 *Изменить режим:*\n"
+        f"`/settings creator` - только создатель\n"
+        f"`/settings admins` - все админы\n"
+        f"`/settings selected` - выбранные\n"
+        f"`/settings everyone` - все\n\n"
+        f"👥 *Управление пользователями:*\n"
+        f"`/allowuser @username` - разрешить\n"
+        f"`/denyuser @username` - запретить",
         parse_mode='Markdown'
     )
 
+async def allow_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Разрешить пользователю создавать скрипты"""
+    chat_id = str(update.effective_chat.id)
+    
+    if not await is_chat_creator(update, context):
+        await update.message.reply_text("❌ Только создатель чата может управлять доступом!")
+        return
+    
+    # Проверяем reply на сообщение
+    if update.message.reply_to_message:
+        target_user = update.message.reply_to_message.from_user
+        target_id = target_user.id
+        target_name = target_user.username or target_user.first_name
+    elif context.args:
+        # Пробуем получить по username (нужен ID)
+        await update.message.reply_text(
+            "💡 Ответьте на сообщение пользователя командой `/allowuser`\n"
+            "Или укажите ID: `/allowuser 123456789`",
+            parse_mode='Markdown'
+        )
+        try:
+            target_id = int(context.args[0].replace('@', ''))
+            target_name = str(target_id)
+        except:
+            return
+    else:
+        await update.message.reply_text(
+            "❌ Ответьте на сообщение пользователя или укажите ID:\n"
+            "`/allowuser 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if add_allowed_user(chat_id, target_id):
+        await update.message.reply_text(f"✅ Пользователь {target_name} (ID: {target_id}) добавлен в список разрешённых!")
+    else:
+        await update.message.reply_text("❌ Не удалось добавить пользователя. Возможно, нет настроек чата.")
+
+async def deny_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Запретить пользователю создавать скрипты"""
+    chat_id = str(update.effective_chat.id)
+    
+    if not await is_chat_creator(update, context):
+        await update.message.reply_text("❌ Только создатель чата может управлять доступом!")
+        return
+    
+    if update.message.reply_to_message:
+        target_user = update.message.reply_to_message.from_user
+        target_id = target_user.id
+        target_name = target_user.username or target_user.first_name
+    elif context.args:
+        try:
+            target_id = int(context.args[0].replace('@', ''))
+            target_name = str(target_id)
+        except:
+            await update.message.reply_text("❌ Укажите корректный ID пользователя")
+            return
+    else:
+        await update.message.reply_text(
+            "❌ Ответьте на сообщение пользователя или укажите ID:\n"
+            "`/denyuser 123456789`",
+            parse_mode='Markdown'
+        )
+        return
+    
+    if remove_allowed_user(chat_id, target_id):
+        await update.message.reply_text(f"✅ Пользователь {target_name} (ID: {target_id}) удалён из списка разрешённых!")
+    else:
+        await update.message.reply_text("❌ Пользователь не найден в списке разрешённых.")
+
 async def db_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать информацию о базе данных"""
+    """Показать информацию о базе данных (только для разработчика)"""
+    user_id = update.effective_user.id
+    
+    if user_id != DEVELOPER_ID:
+        await update.message.reply_text("❌ Эта команда доступна только разработчику.")
+        return
+    
     stats = get_db_stats()
     
     if stats:
@@ -247,6 +570,7 @@ async def db_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📜 Скриптов: {stats['scripts']}\n"
             f"👥 Пользователей: {stats['users']}\n"
             f"💬 Чатов: {stats['chats']}\n"
+            f"⚙️ Настроек чатов: {stats['settings']}\n"
             f"📝 Логов: {stats['logs']}\n\n"
             f"✅ БД работает нормально!",
             parse_mode='Markdown'
@@ -276,6 +600,15 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
     
+    # Проверяем права доступа
+    if not await check_script_permission(update, context):
+        await update.message.reply_text(
+            "❌ У вас нет прав на создание скриптов в этом чате.\n"
+            "Обратитесь к создателю чата.",
+            parse_mode='Markdown'
+        )
+        return
+    
     pending_scripts[user_id] = {
         'chat_id': chat_id,
         'code': '',
@@ -285,16 +618,17 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     await update.message.reply_text(
-        "📝 *Отправьте скрипт в следующем формате:*\n\n"
+        "📝 *Отправьте скрипт одним из способов:*\n\n"
+        "1️⃣ *Текстом:*\n"
         "```\n"
-        "###COMMAND: название_команды\n"
+        "###COMMAND: название\n"
         "###DESCRIPTION: описание\n"
         "###CODE:\n"
-        "# Ваш Python код здесь\n"
         "async def execute(update, context, args):\n"
         "    return 'Результат'\n"
         "```\n\n"
-        "📌 Можно отправлять код частями!\n"
+        "2️⃣ *Файлом .txt* с тем же форматом\n\n"
+        "📌 Можно отправлять частями!\n"
         "⚠️ `/cancel` - отменить",
         parse_mode='Markdown'
     )
@@ -338,6 +672,11 @@ async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
     
+    # Проверяем права доступа
+    if not await check_script_permission(update, context):
+        await update.message.reply_text("❌ У вас нет прав на редактирование скриптов!")
+        return
+    
     if not context.args:
         await update.message.reply_text(
             "❌ Укажите команду: `/editscript /команда`",
@@ -366,10 +705,9 @@ async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"✏️ *Редактирование* `{command}`\n\n"
-        f"📝 Текущее описание: {script_info['description']}\n\n"
-        f"Отправьте *новый код полностью* (можно частями).\n"
-        f"Формат такой же как при добавлении.\n\n"
-        f"⚠️ `/cancel` - отменить редактирование",
+        f"📝 Описание: {script_info['description']}\n\n"
+        f"Отправьте *новый код* (текстом или .txt файлом).\n\n"
+        f"⚠️ `/cancel` - отменить",
         parse_mode='Markdown'
     )
     
@@ -379,7 +717,7 @@ async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📄 Текущий код:\n```python\n" + current_code + "\n```", parse_mode='Markdown')
 
 def parse_script_text(text):
-    """Парсинг текста скрипта, возвращает (command, description, code)"""
+    """Парсинг текста скрипта"""
     lines = text.strip().split('\n')
     command = None
     description = "Без описания"
@@ -401,8 +739,88 @@ def parse_script_text(text):
     code = '\n'.join(code_lines)
     return command, description, code
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка загруженных документов (.txt файлов)"""
+    user_id = update.effective_user.id
+    document = update.message.document
+    
+    if not document:
+        return False
+    
+    # Проверяем, что это текстовый файл
+    file_name = document.file_name or ""
+    if not file_name.endswith('.txt'):
+        return False
+    
+    # Проверяем, ожидаем ли скрипт
+    if user_id not in pending_scripts and user_id not in editing_scripts:
+        # Может быть новый скрипт без /addscript
+        if not await check_script_permission(update, context):
+            return False
+        
+        pending_scripts[user_id] = {
+            'chat_id': str(update.effective_chat.id),
+            'code': '',
+            'command': None,
+            'description': 'Без описания',
+            'stage': 'waiting_first'
+        }
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        file_content = await file.download_as_bytearray()
+        text = file_content.decode('utf-8')
+        
+        await update.message.reply_text(f"📄 Файл `{file_name}` получен ({len(text)} символов)")
+        
+        # Обрабатываем как текст
+        if user_id in editing_scripts:
+            # Режим редактирования
+            editing = editing_scripts[user_id]
+            command, description, code = parse_script_text(text)
+            editing['code'] = code if code else text
+            if description != "Без описания":
+                editing['new_description'] = description
+            editing['stage'] = 'waiting_more'
+            
+            await update.message.reply_text(
+                f"✅ Код из файла получен!\n\n"
+                f"❓ Есть ещё код? Отправьте или напишите `готово`",
+                parse_mode='Markdown'
+            )
+        else:
+            # Режим добавления
+            pending = pending_scripts[user_id]
+            command, description, code = parse_script_text(text)
+            
+            if command:
+                pending['command'] = command
+            if description != "Без описания":
+                pending['description'] = description
+            
+            if pending['stage'] == 'waiting_first':
+                pending['code'] = code if code else text
+            else:
+                pending['code'] += '\n' + (code if code else text)
+            
+            pending['stage'] = 'waiting_more'
+            
+            await update.message.reply_text(
+                f"✅ Код из файла получен!\n\n"
+                f"📌 Команда: `{pending['command'] or 'не указана'}`\n\n"
+                f"❓ Есть ещё код? Отправьте или напишите `готово`",
+                parse_mode='Markdown'
+            )
+        
+        return True
+        
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка чтения файла: {e}")
+        return True
+
 async def handle_script_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженного скрипта (многочастная загрузка)"""
+    """Обработка загруженного скрипта"""
     user_id = update.effective_user.id
     text = update.message.text
     
@@ -437,9 +855,9 @@ async def handle_script_upload(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(
         f"✅ Код получен! (всего {len(pending['code'])} символов)\n\n"
         f"📌 Команда: `{pending['command'] or 'не указана'}`\n\n"
-        f"❓ *Есть чем дополнить код?*\n"
-        f"• Отправьте продолжение кода\n"
-        f"• Или напишите `нет` / `готово` для сохранения\n\n"
+        f"❓ *Есть ещё код?*\n"
+        f"• Отправьте продолжение\n"
+        f"• Или напишите `готово`\n\n"
         f"⚠️ `/cancel` - отменить",
         parse_mode='Markdown'
     )
@@ -475,10 +893,7 @@ async def handle_edit_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     await update.message.reply_text(
         f"✅ Код получен! (всего {len(editing['code'])} символов)\n\n"
-        f"❓ *Есть чем дополнить код?*\n"
-        f"• Отправьте продолжение\n"
-        f"• Или напишите `нет` / `готово` для сохранения\n\n"
-        f"⚠️ `/cancel` - отменить",
+        f"❓ Есть ещё код? Отправьте или напишите `готово`",
         parse_mode='Markdown'
     )
     
@@ -501,10 +916,8 @@ async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         await update.message.reply_text("❌ Не найдена функция execute! Скрипт не сохранён.")
         return True
     
-    # Сохранение скрипта в БД
-    save_script_to_db(chat_id, command, description, code, author)
+    save_script_to_db(chat_id, command, description, code, author, user_id)
     
-    # Обновление кэша
     if chat_id not in scripts_registry:
         scripts_registry[chat_id] = {}
     
@@ -518,11 +931,11 @@ async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, us
     save_user(user_id, update.effective_user.username, update.effective_user.first_name)
     
     await update.message.reply_text(
-        f"✅ *Скрипт успешно сохранён!*\n\n"
+        f"✅ *Скрипт сохранён!*\n\n"
         f"📌 Команда: `{command}`\n"
         f"📝 Описание: {description}\n"
         f"📦 Размер: {len(code)} символов\n\n"
-        f"Теперь вы можете использовать `{command}` в этом чате!",
+        f"Используйте `{command}` в этом чате!",
         parse_mode='Markdown'
     )
     
@@ -547,7 +960,7 @@ async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     description = editing.get('new_description', script_info['description'])
     author = script_info['author']
     
-    save_script_to_db(chat_id, command, description, code, author)
+    save_script_to_db(chat_id, command, description, code, author, user_id)
     
     if chat_id in scripts_registry and command in scripts_registry[chat_id]:
         scripts_registry[chat_id][command]['code'] = code
@@ -630,7 +1043,7 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         log_execution(chat_id, user_id, command, False, str(e))
         print(f"Script execution error: {e}")
-        await update.message.reply_text(f"❌ Ошибка выполнения скрипта:\n`{str(e)}`", parse_mode='Markdown')
+        await update.message.reply_text(f"❌ Ошибка выполнения:\n`{str(e)}`", parse_mode='Markdown')
     
     return True
 
@@ -641,10 +1054,10 @@ async def list_scripts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     scripts = get_chat_scripts(chat_id)
     
     if not scripts:
-        await update.message.reply_text("📭 В этом чате пока нет кастомных скриптов.")
+        await update.message.reply_text("📭 В этом чате нет скриптов.")
         return
     
-    text = "📜 *Кастомные скрипты этого чата:*\n\n"
+    text = "📜 *Скрипты этого чата:*\n\n"
     for cmd, info in scripts.items():
         text += f"• `{cmd}` - {info['description']}\n"
         text += f"  _Автор: @{info['author']}_\n\n"
@@ -655,8 +1068,12 @@ async def delete_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Удалить скрипт"""
     chat_id = str(update.effective_chat.id)
     
+    if not await check_script_permission(update, context):
+        await update.message.reply_text("❌ У вас нет прав на удаление скриптов!")
+        return
+    
     if not context.args:
-        await update.message.reply_text("❌ Укажите команду для удаления: `/deletescript /команда`", parse_mode='Markdown')
+        await update.message.reply_text("❌ Укажите команду: `/deletescript /команда`", parse_mode='Markdown')
         return
     
     command = context.args[0].lower()
@@ -675,32 +1092,33 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Помощь"""
     await update.message.reply_text(
         "📖 *Справка по боту*\n\n"
-        "*Команды управления:*\n"
+        "*Команды:*\n"
         "`/addscript` - Добавить скрипт\n"
         "`/listscripts` - Список скриптов\n"
         "`/viewscript /cmd` - Посмотреть код\n"
         "`/editscript /cmd` - Редактировать\n"
         "`/deletescript /cmd` - Удалить\n"
-        "`/dbinfo` - Информация о БД\n"
+        "`/settings` - Настройки доступа\n"
+        "`/allowuser` - Разрешить пользователю\n"
+        "`/denyuser` - Запретить пользователю\n"
         "`/cancel` - Отменить действие\n\n"
         "*Как добавить скрипт:*\n"
-        "1. Введите `/addscript`\n"
-        "2. Отправьте код (можно частями!)\n"
-        "3. Напишите `готово` когда закончите\n\n"
-        "*Формат скрипта:*\n"
+        "1. `/addscript`\n"
+        "2. Отправьте код текстом или .txt файлом\n"
+        "3. Напишите `готово`\n\n"
+        "*Формат:*\n"
         "```\n"
         "###COMMAND: mycommand\n"
         "###DESCRIPTION: Описание\n"
         "###CODE:\n"
         "async def execute(update, context, args):\n"
         "    return 'Привет!'\n"
-        "```\n\n"
-        "🔓 Все модули Python разрешены!",
+        "```",
         parse_mode='Markdown'
     )
 
 async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запуск триггер-скриптов на каждое сообщение"""
+    """Запуск триггер-скриптов"""
     chat_id = str(update.effective_chat.id)
     
     scripts = get_chat_scripts(chat_id)
@@ -750,13 +1168,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text and update.message.text.startswith('/'):
         await execute_custom_script(update, context)
 
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик документов"""
+    await handle_document(update, context)
+
 def main():
     """Запуск бота"""
     print("🚀 Запуск бота...")
     print(f"📁 Директория данных: {DATA_DIR.absolute()}")
     print(f"🗄️ База данных: {DB_PATH.absolute()}")
     
-    # Загружаем данные из БД при старте
     global scripts_registry
     scripts_registry = load_scripts_registry()
     
@@ -769,11 +1190,17 @@ def main():
     application.add_handler(CommandHandler("viewscript", view_script))
     application.add_handler(CommandHandler("editscript", edit_script))
     application.add_handler(CommandHandler("deletescript", delete_script))
+    application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(CommandHandler("allowuser", allow_user))
+    application.add_handler(CommandHandler("denyuser", deny_user))
     application.add_handler(CommandHandler("dbinfo", db_info))
     application.add_handler(CommandHandler("cancel", cancel_action))
     application.add_handler(CommandHandler("help", help_command))
     
-    # Обработчик всех сообщений
+    # Обработчик документов (.txt файлы)
+    application.add_handler(MessageHandler(filters.Document.ALL, document_handler))
+    
+    # Обработчик текстовых сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     application.add_handler(MessageHandler(filters.COMMAND, execute_custom_script))
     
