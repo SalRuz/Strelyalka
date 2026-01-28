@@ -762,8 +762,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return True
     
-    # Определяем автора (username или first_name)
-    file_author = update.effective_user.username or update.effective_user.first_name or str(user_id)
+    # Автор из .txt файла всегда "неизвестный"
+    file_author = "неизвестный"
     
     try:
         # Скачиваем файл
@@ -875,6 +875,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_script_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка загруженного скрипта"""
+    # Проверка на наличие текста
+    if not update.message or not update.message.text:
+        return False
+    
     user_id = update.effective_user.id
     text = update.message.text
     
@@ -924,6 +928,10 @@ async def handle_script_upload(update: Update, context: ContextTypes.DEFAULT_TYP
 
 async def handle_edit_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработка загрузки при редактировании"""
+    # Проверка на наличие текста
+    if not update.message or not update.message.text:
+        return False
+    
     user_id = update.effective_user.id
     text = update.message.text
     
@@ -963,80 +971,102 @@ async def handle_edit_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
     """Финализация и сохранение нового скрипта"""
-    pending = pending_scripts.pop(user_id)
-    chat_id = pending['chat_id']
-    code = pending['code']
-    command = pending['command']
-    description = pending['description']
-    author = update.effective_user.username or update.effective_user.first_name or str(user_id)
-    
-    if not command:
-        await update.message.reply_text("❌ Не указана команда (###COMMAND:)! Скрипт не сохранён.")
+    try:
+        if user_id not in pending_scripts:
+            await update.message.reply_text("❌ Нет данных для сохранения. Начните заново с /addscript")
+            return True
+        
+        pending = pending_scripts.pop(user_id)
+        chat_id = pending['chat_id']
+        code = pending['code']
+        command = pending['command']
+        description = pending['description']
+        author = update.effective_user.username or update.effective_user.first_name or str(user_id)
+        
+        if not code or not code.strip():
+            await update.message.reply_text("❌ Пустой код! Скрипт не сохранён. Начните заново с /addscript")
+            return True
+        
+        if not command:
+            await update.message.reply_text("❌ Не указана команда (###COMMAND:)! Скрипт не сохранён.")
+            return True
+        
+        if 'async def execute' not in code and 'def execute' not in code:
+            await update.message.reply_text("❌ Не найдена функция execute! Скрипт не сохранён.")
+            return True
+        
+        save_script_to_db(chat_id, command, description, code, author, user_id)
+        
+        if chat_id not in scripts_registry:
+            scripts_registry[chat_id] = {}
+        
+        scripts_registry[chat_id][command] = {
+            'description': description,
+            'code': code,
+            'author': author,
+            'created': datetime.now().isoformat()
+        }
+        
+        save_user(user_id, update.effective_user.username, update.effective_user.first_name)
+        
+        await update.message.reply_text(
+            f"✅ *Скрипт сохранён!*\n\n"
+            f"📌 Команда: `{command}`\n"
+            f"📝 Описание: {description}\n"
+            f"📦 Размер: {len(code)} символов\n\n"
+            f"Используйте `{command}` в этом чате!",
+            parse_mode='Markdown'
+        )
+        
         return True
-    
-    if 'async def execute' not in code and 'def execute' not in code:
-        await update.message.reply_text("❌ Не найдена функция execute! Скрипт не сохранён.")
+    except Exception as e:
+        print(f"Ошибка finalize_script: {e}")
+        await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
         return True
-    
-    save_script_to_db(chat_id, command, description, code, author, user_id)
-    
-    if chat_id not in scripts_registry:
-        scripts_registry[chat_id] = {}
-    
-    scripts_registry[chat_id][command] = {
-        'description': description,
-        'code': code,
-        'author': author,
-        'created': datetime.now().isoformat()
-    }
-    
-    save_user(user_id, update.effective_user.username, update.effective_user.first_name)
-    
-    await update.message.reply_text(
-        f"✅ *Скрипт сохранён!*\n\n"
-        f"📌 Команда: `{command}`\n"
-        f"📝 Описание: {description}\n"
-        f"📦 Размер: {len(code)} символов\n\n"
-        f"Используйте `{command}` в этом чате!",
-        parse_mode='Markdown'
-    )
-    
-    return True
 
 async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
     """Финализация редактирования скрипта"""
-    editing = editing_scripts.pop(user_id)
-    chat_id = editing['chat_id']
-    command = editing['command']
-    code = editing['code']
-    
-    if not code.strip():
-        await update.message.reply_text("❌ Пустой код! Редактирование отменено.")
+    try:
+        if user_id not in editing_scripts:
+            await update.message.reply_text("❌ Нет данных для сохранения. Начните заново с /editscript")
+            return True
+        
+        editing = editing_scripts.pop(user_id)
+        chat_id = editing['chat_id']
+        command = editing['command']
+        code = editing['code']
+        
+        if not code or not code.strip():
+            await update.message.reply_text("❌ Пустой код! Редактирование отменено.")
+            return True
+        
+        if 'async def execute' not in code and 'def execute' not in code:
+            await update.message.reply_text("❌ Не найдена функция execute! Редактирование отменено.")
+            return True
+        
+        script_info = get_script_from_db(chat_id, command)
+        description = editing.get('new_description', script_info['description'])
+        author = script_info['author']
+        
+        save_script_to_db(chat_id, command, description, code, author, user_id)
+        
+        if chat_id in scripts_registry and command in scripts_registry[chat_id]:
+            scripts_registry[chat_id][command]['code'] = code
+            scripts_registry[chat_id][command]['description'] = description
+            scripts_registry[chat_id][command]['updated'] = datetime.now().isoformat()
+        
+        await update.message.reply_text(
+            f"✅ *Скрипт обновлён!*\n\n"
+            f"📌 Команда: `{command}`\n"
+            f"📦 Новый размер: {len(code)} символов",
+            parse_mode='Markdown'
+        )
+        
         return True
-    
-    if 'async def execute' not in code and 'def execute' not in code:
-        await update.message.reply_text("❌ Не найдена функция execute! Редактирование отменено.")
+    except Exception as e:
+        print(f"Ошибка finalize_edit: {e}")
+        await update.message.reply_text(f"❌ Ошибка сохранения: {e}")
         return True
-    
-    script_info = get_script_from_db(chat_id, command)
-    description = editing.get('new_description', script_info['description'])
-    author = script_info['author']
-    
-    save_script_to_db(chat_id, command, description, code, author, user_id)
-    
-    if chat_id in scripts_registry and command in scripts_registry[chat_id]:
-        scripts_registry[chat_id][command]['code'] = code
-        scripts_registry[chat_id][command]['description'] = description
-        scripts_registry[chat_id][command]['updated'] = datetime.now().isoformat()
-    
-    await update.message.reply_text(
-        f"✅ *Скрипт обновлён!*\n\n"
-        f"📌 Команда: `{command}`\n"
-        f"📦 Новый размер: {len(code)} символов",
-        parse_mode='Markdown'
-    )
-    
-    return True
 
 async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Выполнение кастомного скрипта"""
