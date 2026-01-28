@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Конфигурация
-BOT_TOKEN = "YOUR_BOT_TOKEN"
+BOT_TOKEN = "8512207770:AAEKLtYEph7gleybGhF2lc7Gwq82Kj1yedM"
 DEVELOPER_ID = 1170970828  # ID разработчика для /dbinfo
 
 # === ИНИЦИАЛИЗАЦИЯ ДИРЕКТОРИИ И БД ===
