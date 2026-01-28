@@ -11,29 +11,21 @@ BOT_TOKEN = "8512207770:AAEKLtYEph7gleybGhF2lc7Gwq82Kj1yedM"
 
 # === ИНИЦИАЛИЗАЦИЯ ДИРЕКТОРИИ И БД ===
 
-def get_data_directory():
-    """Получить доступную директорию для данных"""
-    # Пробуем /data (Docker volume)
-    data_dir = Path("/data")
-    try:
-        data_dir.mkdir(parents=True, exist_ok=True)
-        # Проверяем, можем ли писать
-        test_file = data_dir / ".write_test"
-        test_file.write_text("test")
-        test_file.unlink()
-        print(f"✅ Используется директория: {data_dir.absolute()}")
-        return data_dir
-    except (PermissionError, OSError) as e:
-        print(f"⚠️ /data недоступна: {e}")
-    
-    # Fallback на ./data
-    data_dir = Path("./data")
-    data_dir.mkdir(parents=True, exist_ok=True)
-    print(f"✅ Используется локальная директория: {data_dir.absolute()}")
-    return data_dir
-
-# Путь к папке data
-DATA_DIR = get_data_directory()
+# Пробуем /data (Docker volume)
+DATA_DIR = Path("/data")
+try:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    # Проверяем, можем ли писать
+    test_file = DATA_DIR / ".write_test"
+    test_file.write_text("test")
+    test_file.unlink()
+    print(f"✅ Используется директория: {DATA_DIR.absolute()}")
+except (PermissionError, OSError) as e:
+    print(f"⚠️ /data недоступна: {e}")
+    # Fallback на ./data (рядом с bot.py)
+    DATA_DIR = Path("./data")
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"✅ Используется локальная директория: {DATA_DIR.absolute()}")
 
 # Путь к базе данных
 DB_PATH = DATA_DIR / "bot.db"
