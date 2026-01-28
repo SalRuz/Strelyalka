@@ -762,6 +762,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return True
     
+    # Определяем автора (username или first_name)
+    file_author = update.effective_user.username or update.effective_user.first_name or str(user_id)
+    
     try:
         # Скачиваем файл
         file = await context.bot.get_file(document.file_id)
@@ -794,11 +797,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ Не найдена функция execute! Файл не сохранён.")
                 return True
             
-            # Сохраняем
+            # Сохраняем (автор остаётся оригинальный)
             script_info = get_script_from_db(target_chat_id, target_command)
-            author = script_info['author'] if script_info else (update.effective_user.username or str(user_id))
+            original_author = script_info['author'] if script_info else file_author
             
-            save_script_to_db(target_chat_id, target_command, new_description, code, author, user_id)
+            save_script_to_db(target_chat_id, target_command, new_description, code, original_author, user_id)
             
             # Обновляем кэш
             if target_chat_id in scripts_registry and target_command in scripts_registry[target_chat_id]:
@@ -838,9 +841,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Не найдена функция execute! Файл не сохранён.")
             return True
         
-        # Сохраняем скрипт
-        author = update.effective_user.username or str(user_id)
-        save_script_to_db(chat_id, command, description, code, author, user_id)
+        # Сохраняем скрипт с правильным автором
+        save_script_to_db(chat_id, command, description, code, file_author, user_id)
         
         # Обновляем кэш
         if chat_id not in scripts_registry:
@@ -849,7 +851,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         scripts_registry[chat_id][command] = {
             'description': description,
             'code': code,
-            'author': author,
+            'author': file_author,
             'created': datetime.now().isoformat()
         }
         
@@ -859,6 +861,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ *Скрипт сохранён из файла!*\n\n"
             f"📌 Команда: `{command}`\n"
             f"📝 Описание: {description}\n"
+            f"👤 Автор: {file_author}\n"
             f"📦 Размер: {len(code)} символов\n\n"
             f"Используйте `{command}` в этом чате!",
             parse_mode='Markdown'
@@ -884,11 +887,15 @@ async def handle_script_upload(update: Update, context: ContextTypes.DEFAULT_TYP
     pending = pending_scripts[user_id]
     chat_id = pending['chat_id']
     
-    lower_text = text.lower().strip()
-    if lower_text in ['нет', 'no', 'готово', 'done', 'сохранить', 'save']:
+    # Убираем знаки препинания для проверки
+    lower_text = text.lower().strip().rstrip('!.,;:?')
+    finish_words = ['нет', 'no', 'готово', 'done', 'сохранить', 'save', 'хватит', 'всё', 'все', 'конец', 'end', 'finish', 'ok', 'ок', 'сохрани', 'финиш']
+    continue_words = ['да', 'yes', 'ещё', 'еще', 'more', 'есть', 'продолжить', 'дальше']
+    
+    if lower_text in finish_words:
         return await finalize_script(update, context, user_id)
     
-    if lower_text in ['да', 'yes', 'ещё', 'еще', 'more']:
+    if lower_text in continue_words:
         await update.message.reply_text("📝 Отправьте продолжение кода:")
         return True
     
@@ -925,11 +932,15 @@ async def handle_edit_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     editing = editing_scripts[user_id]
     
-    lower_text = text.lower().strip()
-    if lower_text in ['нет', 'no', 'готово', 'done', 'сохранить', 'save']:
+    # Убираем знаки препинания для проверки
+    lower_text = text.lower().strip().rstrip('!.,;:?')
+    finish_words = ['нет', 'no', 'готово', 'done', 'сохранить', 'save', 'хватит', 'всё', 'все', 'конец', 'end', 'finish', 'ok', 'ок', 'сохрани', 'финиш']
+    continue_words = ['да', 'yes', 'ещё', 'еще', 'more', 'есть', 'продолжить', 'дальше']
+    
+    if lower_text in finish_words:
         return await finalize_edit(update, context, user_id)
     
-    if lower_text in ['да', 'yes', 'ещё', 'еще', 'more']:
+    if lower_text in continue_words:
         await update.message.reply_text("📝 Отправьте продолжение кода:")
         return True
     
@@ -957,7 +968,7 @@ async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, us
     code = pending['code']
     command = pending['command']
     description = pending['description']
-    author = update.effective_user.username or str(user_id)
+    author = update.effective_user.username or update.effective_user.first_name or str(user_id)
     
     if not command:
         await update.message.reply_text("❌ Не указана команда (###COMMAND:)! Скрипт не сохранён.")
