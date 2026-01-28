@@ -13,12 +13,10 @@ BOT_TOKEN = "8512207770:AAEKLtYEph7gleybGhF2lc7Gwq82Kj1yedM"
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-# Путь к базе данных
 DB_PATH = DATA_DIR / "bot.db"
 
-# Создаем базу, если её нет
-if not DB_PATH.exists():
+def init_database():
+    """Инициализация базы данных"""
     conn = sqlite3.connect(str(DB_PATH))
     
     # Таблица скриптов
@@ -61,9 +59,7 @@ if not DB_PATH.exists():
     
     conn.commit()
     conn.close()
-    print(f"✅ База данных создана: {DB_PATH}")
-else:
-    print(f"✅ База данных найдена: {DB_PATH}")
+    print(f"✅ База данных инициализирована: {DB_PATH.absolute()}")
 
 def get_db_connection():
     """Получить соединение с БД"""
@@ -71,23 +67,33 @@ def get_db_connection():
 
 def load_scripts_registry():
     """Загрузка реестра скриптов из БД"""
+    global scripts_registry
+    
+    # Инициализируем БД при загрузке данных
+    init_database()
+    
     registry = {}
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT chat_id, command, description, code, author, created_at, updated_at FROM scripts")
-    for row in cursor.fetchall():
-        chat_id, command, description, code, author, created_at, updated_at = row
-        if chat_id not in registry:
-            registry[chat_id] = {}
-        registry[chat_id][command] = {
-            'description': description,
-            'code': code,
-            'author': author,
-            'created': created_at,
-            'updated': updated_at
-        }
-    conn.close()
-    print(f"📚 Загружено скриптов: {sum(len(v) for v in registry.values())}")
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT chat_id, command, description, code, author, created_at, updated_at FROM scripts")
+        for row in cursor.fetchall():
+            chat_id, command, description, code, author, created_at, updated_at = row
+            if chat_id not in registry:
+                registry[chat_id] = {}
+            registry[chat_id][command] = {
+                'description': description,
+                'code': code,
+                'author': author,
+                'created': created_at,
+                'updated': updated_at
+            }
+        conn.close()
+        total_scripts = sum(len(v) for v in registry.values())
+        print(f"📚 Загружено скриптов: {total_scripts}")
+    except Exception as e:
+        print(f"❌ Ошибка загрузки скриптов: {e}")
+    
     return registry
 
 def save_script_to_db(chat_id, command, description, code, author):
@@ -203,8 +209,8 @@ def get_db_stats():
         print(f"Ошибка получения статистики: {e}")
         return None
 
-# Глобальный реестр скриптов (кэш из БД)
-scripts_registry = load_scripts_registry()
+# Глобальный реестр скриптов (кэш из БД, загружается в main())
+scripts_registry = {}
 
 # Состояния для многочастной загрузки скриптов
 pending_scripts = {}
@@ -747,8 +753,12 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Запуск бота"""
     print("🚀 Запуск бота...")
-    print(f"📁 Директория данных: {DATA_DIR}")
-    print(f"🗄️ База данных: {DB_PATH}")
+    print(f"📁 Директория данных: {DATA_DIR.absolute()}")
+    print(f"🗄️ База данных: {DB_PATH.absolute()}")
+    
+    # Загружаем данные из БД при старте
+    global scripts_registry
+    scripts_registry = load_scripts_registry()
     
     application = Application.builder().token(BOT_TOKEN).build()
     
