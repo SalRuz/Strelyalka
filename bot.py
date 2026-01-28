@@ -11,21 +11,8 @@ BOT_TOKEN = "8512207770:AAEKLtYEph7gleybGhF2lc7Gwq82Kj1yedM"
 
 # === ИНИЦИАЛИЗАЦИЯ ДИРЕКТОРИИ И БД ===
 
-# Пробуем /data (Docker volume)
-DATA_DIR = Path("/data")
-try:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    # Проверяем, можем ли писать
-    test_file = DATA_DIR / ".write_test"
-    test_file.write_text("test")
-    test_file.unlink()
-    print(f"✅ Используется директория: {DATA_DIR.absolute()}")
-except (PermissionError, OSError) as e:
-    print(f"⚠️ /data недоступна: {e}")
-    # Fallback на ./data (рядом с bot.py)
-    DATA_DIR = Path("./data")
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"✅ Используется локальная директория: {DATA_DIR.absolute()}")
+DATA_DIR = Path("data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Путь к базе данных
 DB_PATH = DATA_DIR / "bot.db"
@@ -74,9 +61,9 @@ if not DB_PATH.exists():
     
     conn.commit()
     conn.close()
-    print(f"✅ База данных создана: {DB_PATH.absolute()}")
+    print(f"✅ База данных создана: {DB_PATH}")
 else:
-    print(f"✅ База данных найдена: {DB_PATH.absolute()}")
+    print(f"✅ База данных найдена: {DB_PATH}")
 
 def get_db_connection():
     """Получить соединение с БД"""
@@ -209,11 +196,11 @@ def get_db_stats():
             'users': users_count,
             'logs': logs_count,
             'chats': chats_count,
-            'db_path': str(DB_PATH.absolute()),
+            'db_path': str(DB_PATH),
             'db_size': DB_PATH.stat().st_size if DB_PATH.exists() else 0
         }
     except Exception as e:
-        print(f"❌ Ошибка получения статистики: {e}")
+        print(f"Ошибка получения статистики: {e}")
         return None
 
 # Глобальный реестр скриптов (кэш из БД)
@@ -760,8 +747,8 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     """Запуск бота"""
     print("🚀 Запуск бота...")
-    print(f"📁 Директория данных: {DATA_DIR.absolute()}")
-    print(f"🗄️ База данных: {DB_PATH.absolute()}")
+    print(f"📁 Директория данных: {DATA_DIR}")
+    print(f"🗄️ База данных: {DB_PATH}")
     
     application = Application.builder().token(BOT_TOKEN).build()
     
