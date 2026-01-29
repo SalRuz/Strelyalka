@@ -614,7 +614,6 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "###DESCRIPTION: описание\n"
         "###CODE:\n"
         "async def execute(update, context, args):\n"
-        "    return 'Результат'\n"
         "    return 'Результат'\n\n"
         "Если в скрипте есть база данных, то использовать строго SQlite.\n\n"
         "Если в скрипте есть подкоманды, то использовать их строго после основной команды, пример: /kod start, /kod stop.\n\n"
@@ -653,10 +652,18 @@ async def view_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     max_code_len = 3500
     
     if len(code) > max_code_len:
-        parts = [code[i:i+max_code_len] for i in range(0, len(code), max_code_len)]
-        await update.message.reply_text(header + f"📦 Код разбит на {len(parts)} частей:")
-        for i, part in enumerate(parts, 1):
-            await update.message.reply_text(f"```python\n{part}\n```", parse_mode='Markdown')
+        # Отправляем как .txt файл
+        import io
+        file_content = code.encode('utf-8')
+        file = io.BytesIO(file_content)
+        filename = command.replace('/', '') + '.txt'
+        
+        await update.message.reply_document(
+            document=file,
+            filename=filename,
+            caption=f"📄 *Исходный код* `{command}`\n📝 {script_info['description']}\n\n📦 Размер: {len(code)} символов",
+            parse_mode='Markdown'
+        )
     else:
         await update.message.reply_text(header + f"```python\n{code}\n```", parse_mode='Markdown')
 
