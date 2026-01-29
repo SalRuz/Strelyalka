@@ -1,20 +1,32 @@
 import os
+import io
+import json
 import sqlite3
 import asyncio
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from datetime import datetime
 from pathlib import Path
 
+# Настройка логирования
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 # Конфигурация
 BOT_TOKEN = "8512207770:AAEKLtYEph7gleybGhF2lc7Gwq82Kj1yedM"
 
 # Путь к папке data
-DATA_DIR = Path("/data")
+DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Путь к базе данных
 DB_PATH = DATA_DIR / "bot.db"
+
+# ==================== СИСТЕМА ХРАНЕНИЯ ДАННЫХ ====================
 
 def init_database():
     """Инициализация базы данных"""
@@ -30,19 +42,29 @@ def init_database():
             description TEXT DEFAULT 'Без описания',
             code TEXT NOT NULL,
             author TEXT,
+            author_id INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(chat_id, command)
         )
     ''')
     
-    # Таблица пользователей (для статистики)
+    # Таблица пользователей
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
+            user_id INTEGER PRIMARY KEY,
             username TEXT,
             first_name TEXT,
+            data TEXT DEFAULT '{}',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    
+    # Таблица состояния бота (для глобальных настроек)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS bot_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         )
     ''')
     
@@ -61,45 +83,129 @@ def init_database():
     
     conn.commit()
     conn.close()
-    print(f"База данных инициализирована: {DB_PATH}")
-
-# Инициализируем БД при запуске
-init_database()
+    logger.info(f"✅ База данных инициализирована: {DB_PATH}")
 
 def get_db_connection():
     """Получить соединение с БД"""
     return sqlite3.connect(str(DB_PATH))
 
-def load_scripts_registry():
-    """Загрузка реестра скриптов из БД"""
-    registry = {}
+def load_data():
+    """Загрузка всех данных из БД"""
+    global scripts_registry, users_data, bot_state
+    
+    init_database()
+    
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT chat_id, command, description, code, author, created_at, updated_at FROM scripts")
+    
+    # Загрузка скриптов
+    scripts_registry = {}
+    cursor.execute("SELECT chat_id, command, description, code, author, author_id, created_at, updated_at FROM scripts")
     for row in cursor.fetchall():
-        chat_id, command, description, code, author, created_at, updated_at = row
-        if chat_id not in registry:
-            registry[chat_id] = {}
-        registry[chat_id][command] = {
+        chat_id, command, description, code, author, author_id, created_at, updated_at = row
+        if chat_id not in scripts_registry:
+            scripts_registry[chat_id] = {}
+        scripts_registry[chat_id][command] = {
             'description': description,
             'code': code,
             'author': author,
+            'author_id': author_id,
             'created': created_at,
             'updated': updated_at
         }
+    
+    # Загрузка пользователей
+    users_data = {}
+    cursor.execute("SELECT user_id, username, first_name, data FROM users")
+    for row in cursor.fetchall():
+        user_id, username, first_name, data = row
+        try:
+            users_data[user_id] = {
+                'username': username,
+                'first_name': first_name,
+                'data': json.loads(data) if data else {}
+            }
+        except Exception as e:
+            logger.error(f"Ошибка загрузки пользователя {user_id}: {e}")
+    
+    # Загрузка состояния бота
+    bot_state = {}
+    cursor.execute("SELECT key, value FROM bot_state")
+    for row in cursor.fetchall():
+        try:
+            bot_state[row[0]] = json.loads(row[1])
+        except:
+            bot_state[row[0]] = row[1]
+    
     conn.close()
-    return registry
+    logger.info(f"📦 Загружено скриптов: {sum(len(s) for s in scripts_registry.values())}")
+    logger.info(f"👥 Загружено пользователей: {len(users_data)}")
 
-def save_script_to_db(chat_id, command, description, code, author):
+def save_data():
+    """Сохранение всех данных в БД"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Сохранение скриптов
+        for chat_id, scripts in scripts_registry.items():
+            for command, info in scripts.items():
+                cursor.execute('''
+                    INSERT OR REPLACE INTO scripts 
+                    (chat_id, command, description, code, author, author_id, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (
+                    str(chat_id), command, info.get('description', 'Без описания'),
+                    info['code'], info.get('author'), info.get('author_id')
+                ))
+        
+        # Сохранение пользователей
+        for user_id, info in users_data.items():
+            cursor.execute('''
+                INSERT OR REPLACE INTO users (user_id, username, first_name, data)
+                VALUES (?, ?, ?, ?)
+            ''', (
+                user_id, info.get('username'), info.get('first_name'),
+                json.dumps(info.get('data', {}), ensure_ascii=False)
+            ))
+        
+        # Сохранение состояния бота
+        def save_state(key, value):
+            cursor.execute(
+                "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)",
+                (key, json.dumps(value, ensure_ascii=False))
+            )
+        
+        for key, value in bot_state.items():
+            save_state(key, value)
+        
+        conn.commit()
+        conn.close()
+        logger.debug("💾 Данные сохранены в SQLite.")
+    except Exception as e:
+        logger.error(f"❌ Ошибка сохранения в SQLite: {e}")
+
+def save_script_to_db(chat_id, command, description, code, author, author_id=None):
     """Сохранение скрипта в БД"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT OR REPLACE INTO scripts (chat_id, command, description, code, author, updated_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ''', (str(chat_id), command, description, code, author))
+        INSERT OR REPLACE INTO scripts (chat_id, command, description, code, author, author_id, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ''', (str(chat_id), command, description, code, author, author_id))
     conn.commit()
     conn.close()
+    
+    # Обновляем кэш
+    if chat_id not in scripts_registry:
+        scripts_registry[chat_id] = {}
+    scripts_registry[chat_id][command] = {
+        'description': description,
+        'code': code,
+        'author': author,
+        'author_id': author_id,
+        'updated': datetime.now().isoformat()
+    }
 
 def delete_script_from_db(chat_id, command):
     """Удаление скрипта из БД"""
@@ -109,6 +215,11 @@ def delete_script_from_db(chat_id, command):
     deleted = cursor.rowcount > 0
     conn.commit()
     conn.close()
+    
+    # Обновляем кэш
+    if deleted and chat_id in scripts_registry and command in scripts_registry[chat_id]:
+        del scripts_registry[chat_id][command]
+    
     return deleted
 
 def get_script_from_db(chat_id, command):
@@ -116,7 +227,7 @@ def get_script_from_db(chat_id, command):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT description, code, author, created_at, updated_at FROM scripts WHERE chat_id = ? AND command = ?",
+        "SELECT description, code, author, author_id, created_at, updated_at FROM scripts WHERE chat_id = ? AND command = ?",
         (str(chat_id), command)
     )
     row = cursor.fetchone()
@@ -126,8 +237,9 @@ def get_script_from_db(chat_id, command):
             'description': row[0],
             'code': row[1],
             'author': row[2],
-            'created': row[3],
-            'updated': row[4]
+            'author_id': row[3],
+            'created': row[4],
+            'updated': row[5]
         }
     return None
 
@@ -157,22 +269,36 @@ def log_execution(chat_id, user_id, command, success, error_message=None):
     except:
         pass
 
-def save_user(user_id, username, first_name):
+def save_user(user_id, username, first_name, extra_data=None):
     """Сохранение информации о пользователе"""
     try:
+        if user_id not in users_data:
+            users_data[user_id] = {'username': username, 'first_name': first_name, 'data': {}}
+        else:
+            users_data[user_id]['username'] = username
+            users_data[user_id]['first_name'] = first_name
+        
+        if extra_data:
+            users_data[user_id]['data'].update(extra_data)
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT OR IGNORE INTO users (id, username, first_name)
-            VALUES (?, ?, ?)
-        ''', (user_id, username, first_name))
+            INSERT OR REPLACE INTO users (user_id, username, first_name, data)
+            VALUES (?, ?, ?, ?)
+        ''', (user_id, username, first_name, json.dumps(users_data[user_id].get('data', {}), ensure_ascii=False)))
         conn.commit()
         conn.close()
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"Ошибка сохранения пользователя: {e}")
 
-# Глобальный реестр скриптов (кэш из БД)
-scripts_registry = load_scripts_registry()
+# Глобальные переменные
+scripts_registry = {}
+users_data = {}
+bot_state = {}
+
+# Загружаем данные при старте
+load_data()
 
 # Состояния для многочастной загрузки скриптов
 # {user_id: {'chat_id': str, 'code': str, 'command': str, 'description': str, 'stage': str}}
@@ -268,21 +394,58 @@ async def view_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     code = script_info['code']
+    author = script_info.get('author', 'Unknown')
+    description = script_info.get('description', 'Без описания')
+    created = script_info.get('created', 'N/A')
+    updated = script_info.get('updated', 'N/A')
     
-    # Экранируем специальные символы для Markdown
-    # Разбиваем на части если код большой
-    header = f"📄 *Исходный код* `{command}`\n👤 Автор: @{script_info['author']}\n📝 {script_info['description']}\n\n"
+    # Формируем заголовок
+    header = (
+        f"📄 *Скрипт:* `{command}`\n"
+        f"👤 *Автор:* @{author}\n"
+        f"📝 *Описание:* {description}\n"
+        f"📅 *Создан:* {created[:10] if created else 'N/A'}\n"
+        f"🔄 *Обновлён:* {updated[:10] if updated else 'N/A'}\n"
+        f"📦 *Размер:* {len(code)} символов\n"
+    )
     
-    # Telegram limit ~4096, оставляем запас
-    max_code_len = 3500
+    # Если код большой - отправляем как txt файл
+    max_code_len = 3000
     
     if len(code) > max_code_len:
-        parts = [code[i:i+max_code_len] for i in range(0, len(code), max_code_len)]
-        await update.message.reply_text(header + f"📦 Код разбит на {len(parts)} частей:")
-        for i, part in enumerate(parts, 1):
-            await update.message.reply_text(f"```python\n{part}\n```", parse_mode='Markdown')
+        # Создаём txt файл
+        file_content = f"""# Скрипт: {command}
+# Автор: @{author}
+# Описание: {description}
+# Создан: {created}
+# Обновлён: {updated}
+# ========================================
+
+{code}
+"""
+        # Создаём файл в памяти
+        file_buffer = io.BytesIO(file_content.encode('utf-8'))
+        file_buffer.name = f"script_{command.replace('/', '')}.txt"
+        
+        await update.message.reply_text(header + "\n📎 Код отправлен файлом (слишком большой):", parse_mode='Markdown')
+        await update.message.reply_document(
+            document=file_buffer,
+            filename=file_buffer.name,
+            caption=f"📄 Исходный код {command}"
+        )
     else:
-        await update.message.reply_text(header + f"```python\n{code}\n```", parse_mode='Markdown')
+        # Код небольшой - отправляем в сообщении
+        try:
+            await update.message.reply_text(
+                header + f"\n```python\n{code}\n```",
+                parse_mode='Markdown'
+            )
+        except Exception:
+            # Если Markdown не работает, отправляем файлом
+            file_buffer = io.BytesIO(code.encode('utf-8'))
+            file_buffer.name = f"script_{command.replace('/', '')}.txt"
+            await update.message.reply_text(header, parse_mode='Markdown')
+            await update.message.reply_document(document=file_buffer, filename=file_buffer.name)
 
 async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало редактирования скрипта"""
@@ -453,6 +616,7 @@ async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, us
     command = pending['command']
     description = pending['description']
     author = update.effective_user.username or str(user_id)
+    author_id = user_id
     
     if not command:
         await update.message.reply_text("❌ Не указана команда (###COMMAND:)! Скрипт не сохранён.")
@@ -463,21 +627,13 @@ async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         return True
     
     # Сохранение скрипта в БД
-    save_script_to_db(chat_id, command, description, code, author)
-    
-    # Обновление кэша
-    if chat_id not in scripts_registry:
-        scripts_registry[chat_id] = {}
-    
-    scripts_registry[chat_id][command] = {
-        'description': description,
-        'code': code,
-        'author': author,
-        'created': datetime.now().isoformat()
-    }
+    save_script_to_db(chat_id, command, description, code, author, author_id)
     
     # Сохраняем пользователя
     save_user(user_id, update.effective_user.username, update.effective_user.first_name)
+    
+    # Сохраняем все данные
+    save_data()
     
     await update.message.reply_text(
         f"✅ *Скрипт успешно сохранён!*\n\n"
@@ -487,6 +643,8 @@ async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         f"Теперь вы можете использовать `{command}` в этом чате!",
         parse_mode='Markdown'
     )
+    
+    logger.info(f"💾 Скрипт {command} сохранён пользователем {author} в чате {chat_id}")
     
     return True
 
@@ -509,15 +667,13 @@ async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     script_info = get_script_from_db(chat_id, command)
     description = editing.get('new_description', script_info['description'])
     author = script_info['author']
+    author_id = script_info.get('author_id')
     
     # Сохраняем в БД
-    save_script_to_db(chat_id, command, description, code, author)
+    save_script_to_db(chat_id, command, description, code, author, author_id)
     
-    # Обновляем кэш
-    if chat_id in scripts_registry and command in scripts_registry[chat_id]:
-        scripts_registry[chat_id][command]['code'] = code
-        scripts_registry[chat_id][command]['description'] = description
-        scripts_registry[chat_id][command]['updated'] = datetime.now().isoformat()
+    # Сохраняем все данные
+    save_data()
     
     await update.message.reply_text(
         f"✅ *Скрипт обновлён!*\n\n"
@@ -525,6 +681,8 @@ async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user
         f"📦 Новый размер: {len(code)} символов",
         parse_mode='Markdown'
     )
+    
+    logger.info(f"📝 Скрипт {command} обновлён в чате {chat_id}")
     
     return True
 
@@ -662,8 +820,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/cancel` - Отменить действие\n\n"
         "*Как добавить скрипт:*\n"
         "1. Введите `/addscript`\n"
-        "2. Отправьте код (можно частями!)\n"
-        "3. Напишите `готово` когда закончите\n\n"
+        "2. Отправьте код текстом или `.txt` файлом\n"
+        "3. Можно отправлять частями!\n"
+        "4. Напишите `готово` когда закончите\n\n"
         "*Формат скрипта:*\n"
         "```\n"
         "###COMMAND: mycommand\n"
@@ -672,6 +831,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "async def execute(update, context, args):\n"
         "    return 'Привет!'\n"
         "```\n\n"
+        "📎 Большие скрипты отправляйте как txt!\n"
         "🔓 Все модули Python разрешены!",
         parse_mode='Markdown'
     )
@@ -782,6 +942,81 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     # Если никто не обработал
     await query.answer()
 
+async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка загруженных txt файлов"""
+    user_id = update.effective_user.id
+    document = update.message.document
+    
+    # Проверяем, что это txt файл
+    if not document.file_name.endswith('.txt'):
+        return False
+    
+    # Проверяем, ожидаем ли загрузку скрипта
+    if user_id not in pending_scripts and user_id not in editing_scripts:
+        return False
+    
+    try:
+        # Скачиваем файл
+        file = await context.bot.get_file(document.file_id)
+        file_bytes = await file.download_as_bytearray()
+        file_content = file_bytes.decode('utf-8')
+        
+        # Обрабатываем как обычный текст
+        if user_id in pending_scripts:
+            pending = pending_scripts[user_id]
+            
+            if pending['stage'] == 'waiting_first':
+                command, description, code = parse_script_text(file_content)
+                if command:
+                    pending['command'] = command
+                if description != "Без описания":
+                    pending['description'] = description
+                pending['code'] = code if code else file_content
+                pending['stage'] = 'waiting_more'
+            else:
+                pending['code'] += '\n' + file_content
+            
+            await update.message.reply_text(
+                f"✅ Файл `{document.file_name}` получен!\n"
+                f"📦 Всего кода: {len(pending['code'])} символов\n\n"
+                f"📌 Команда: `{pending['command'] or 'не указана'}`\n\n"
+                f"❓ *Есть чем дополнить код?*\n"
+                f"• Отправьте ещё файл или текст\n"
+                f"• Или напишите `готово` для сохранения\n\n"
+                f"⚠️ `/cancel` - отменить",
+                parse_mode='Markdown'
+            )
+            return True
+        
+        elif user_id in editing_scripts:
+            editing = editing_scripts[user_id]
+            
+            if editing['stage'] == 'waiting_new_code':
+                command, description, code = parse_script_text(file_content)
+                editing['code'] = code if code else file_content
+                if description != "Без описания":
+                    editing['new_description'] = description
+                editing['stage'] = 'waiting_more'
+            else:
+                editing['code'] += '\n' + file_content
+            
+            await update.message.reply_text(
+                f"✅ Файл `{document.file_name}` получен!\n"
+                f"📦 Всего кода: {len(editing['code'])} символов\n\n"
+                f"❓ *Есть чем дополнить код?*\n"
+                f"• Отправьте ещё файл или текст\n"
+                f"• Или напишите `готово` для сохранения\n\n"
+                f"⚠️ `/cancel` - отменить",
+                parse_mode='Markdown'
+            )
+            return True
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка чтения файла: {str(e)}")
+        return True
+    
+    return False
+
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Общий обработчик сообщений"""
     # Сначала проверяем, ожидаем ли скрипт
@@ -794,6 +1029,15 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Затем проверяем кастомные команды
     if update.message.text and update.message.text.startswith('/'):
         await execute_custom_script(update, context)
+
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик документов (txt файлов)"""
+    if update.message.document:
+        if await handle_document_upload(update, context):
+            return
+    
+    # Запускаем проверку триггеров
+    await run_triggers(update, context)
 
 def main():
     """Запуск бота"""
@@ -809,6 +1053,9 @@ def main():
     application.add_handler(CommandHandler("cancel", cancel_action))
     application.add_handler(CommandHandler("help", help_command))
     
+    # Обработчик документов (txt файлы)
+    application.add_handler(MessageHandler(filters.Document.TEXT, document_handler))
+    
     # Обработчик всех сообщений (для скриптов и кастомных команд)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     application.add_handler(MessageHandler(filters.COMMAND, execute_custom_script))
@@ -816,7 +1063,7 @@ def main():
     # Обработчик callback-кнопок (inline buttons)
     application.add_handler(CallbackQueryHandler(handle_callback_query))
     
-    print("🤖 Бот запущен!")
+    logger.info("🤖 Бот запущен!")
     application.run_polling()
 
 if __name__ == "__main__":
