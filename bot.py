@@ -1259,7 +1259,7 @@ def main():
     application.add_handler(CommandHandler("cancel", cancel_action))
     application.add_handler(CommandHandler("help", help_command))
     
-    application.add_handler(CallbackQueryHandler(handle_somka_callbacks, pattern=r"^somka_"))
+    app.add_handler(CallbackQueryHandler(handle_somka_callbacks, pattern=r"^somka_"))
     
     # Обработчик документов (.txt файлы)
     application.add_handler(MessageHandler(filters.Document.ALL, document_handler))
