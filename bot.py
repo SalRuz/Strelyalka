@@ -726,6 +726,17 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'InlineKeyboardMarkup': InlineKeyboardMarkup,  # Для разметки кнопок
         }
         
+        # Добавляем telegram классы
+        try:
+            from telegram import Update as TgUpdate
+            from telegram.ext import ContextTypes as TgContextTypes
+            from telegram.constants import ParseMode
+            local_namespace['Update'] = TgUpdate
+            local_namespace['ContextTypes'] = TgContextTypes
+            local_namespace['ParseMode'] = ParseMode
+        except:
+            pass
+        
         # Предварительно импортируем популярные модули
         popular_modules = [
             'math', 'random', 'datetime', 're', 'json', 'os', 'sys',
@@ -754,8 +765,12 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
                 try:
                     await update.message.reply_text(result_str, parse_mode='Markdown')
                 except Exception:
-                    # Если Markdown не работает (скобки {} и др.), отправляем как есть
-                    await update.message.reply_text(result_str)
+                    # Пробуем MarkdownV2
+                    try:
+                        await update.message.reply_text(result_str, parse_mode='MarkdownV2')
+                    except Exception:
+                        # Если форматирование не работает, отправляем как есть
+                        await update.message.reply_text(result_str)
         
         # Логируем успешное выполнение
         log_execution(chat_id, user_id, command, True)
@@ -763,7 +778,13 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         # Логируем ошибку
         log_execution(chat_id, user_id, command, False, str(e))
-        await update.message.reply_text(f"❌ Ошибка выполнения скрипта:\n`{str(e)}`", parse_mode='Markdown')
+        error_msg = str(e)
+        if len(error_msg) > 500:
+            error_msg = error_msg[:500] + "..."
+        try:
+            await update.message.reply_text(f"❌ Ошибка выполнения скрипта:\n`{error_msg}`", parse_mode='Markdown')
+        except:
+            await update.message.reply_text(f"❌ Ошибка выполнения скрипта:\n{error_msg}")
     
     return True
 
@@ -820,9 +841,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "`/cancel` - Отменить действие\n\n"
         "*Как добавить скрипт:*\n"
         "1. Введите `/addscript`\n"
-        "2. Отправьте код текстом или `.txt` файлом\n"
-        "3. Можно отправлять частями!\n"
-        "4. Напишите `готово` когда закончите\n\n"
+        "2. Отправьте `.txt` файл → сохраняется СРАЗУ!\n"
+        "3. Или текстом частями → напишите `готово`\n\n"
         "*Формат скрипта:*\n"
         "```\n"
         "###COMMAND: mycommand\n"
@@ -831,7 +851,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "async def execute(update, context, args):\n"
         "    return 'Привет!'\n"
         "```\n\n"
-        "📎 Большие скрипты отправляйте как txt!\n"
+        "*Для inline-кнопок:*\n"
+        "Добавьте `async def handle_callback(update, context, callback_data)`\n\n"
+        "📎 txt файлы сохраняются сразу!\n"
         "🔓 Все модули Python разрешены!",
         parse_mode='Markdown'
     )
@@ -895,7 +917,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer("Скрипты не найдены")
         return
     
-    # Ищем скрипты с функцией handle_callback
+    handled = False
+    
+    # Ищем скрипты с функцией handle_callback или специфичными обработчиками
     for cmd in scripts.keys():
         script_info = get_script_from_db(chat_id, cmd)
         if not script_info:
@@ -903,8 +927,15 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         script_code = script_info['code']
         
-        # Проверяем, есть ли функция handle_callback
-        if 'async def handle_callback' not in script_code and 'def handle_callback' not in script_code:
+        # Проверяем, есть ли функция handle_callback или handle_somka_callbacks или подобные
+        has_callback_handler = (
+            'async def handle_callback' in script_code or 
+            'def handle_callback' in script_code or
+            'async def handle_somka_callbacks' in script_code or
+            'def handle_somka_callbacks' in script_code
+        )
+        
+        if not has_callback_handler:
             continue
         
         try:
@@ -921,30 +952,75 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 'InlineKeyboardMarkup': InlineKeyboardMarkup,
             }
             
-            # Импортируем модули
-            for mod in ['math','random','datetime','re','json','os','sys','subprocess',
-                        'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib']:
-                try: local_namespace[mod] = __import__(mod)
-                except: pass
+            # Импортируем ВСЕ популярные модули
+            popular_modules = [
+                'math', 'random', 'datetime', 're', 'json', 'os', 'sys',
+                'subprocess', 'requests', 'asyncio', 'aiohttp', 'time',
+                'hashlib', 'base64', 'urllib', 'collections', 'itertools',
+                'functools', 'operator', 'string', 'textwrap', 'uuid',
+                'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
+                'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
+            ]
+            
+            for mod_name in popular_modules:
+                try:
+                    local_namespace[mod_name] = __import__(mod_name)
+                except ImportError:
+                    pass
+            
+            # Добавляем telegram классы
+            try:
+                from telegram import Update as TgUpdate
+                from telegram.ext import ContextTypes as TgContextTypes
+                from telegram.constants import ParseMode
+                local_namespace['Update'] = TgUpdate
+                local_namespace['ContextTypes'] = TgContextTypes
+                local_namespace['ParseMode'] = ParseMode
+            except:
+                pass
             
             exec(script_code, local_namespace)
             
-            if 'handle_callback' in local_namespace:
-                # Передаём callback_data в функцию
-                result = await local_namespace['handle_callback'](update, context, callback_data)
-                if result:
-                    # Если функция вернула True, значит она обработала callback
-                    return
+            # Пробуем разные варианты названий обработчиков
+            handler_names = ['handle_callback', 'handle_somka_callbacks']
+            
+            for handler_name in handler_names:
+                if handler_name in local_namespace:
+                    try:
+                        # Вызываем обработчик
+                        result = await local_namespace[handler_name](update, context, callback_data)
+                        if result:
+                            handled = True
+                            break
+                    except TypeError:
+                        # Некоторые обработчики могут принимать только (update, context)
+                        try:
+                            result = await local_namespace[handler_name](update, context)
+                            if result:
+                                handled = True
+                                break
+                        except:
+                            pass
+            
+            if handled:
+                return
+                
         except Exception as e:
-            print(f"Callback error in {cmd}: {e}")
-            await query.answer(f"Ошибка: {str(e)[:50]}")
+            logger.error(f"Callback error in {cmd}: {e}")
+            import traceback
+            traceback.print_exc()
     
-    # Если никто не обработал
-    await query.answer()
+    # Если никто не обработал - просто отвечаем
+    if not handled:
+        try:
+            await query.answer()
+        except:
+            pass
 
 async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженных txt файлов"""
+    """Обработка загруженных txt файлов - СРАЗУ сохраняет скрипт"""
     user_id = update.effective_user.id
+    chat_id = str(update.effective_chat.id)
     document = update.message.document
     
     # Проверяем, что это txt файл
@@ -961,54 +1037,80 @@ async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_T
         file_bytes = await file.download_as_bytearray()
         file_content = file_bytes.decode('utf-8')
         
-        # Обрабатываем как обычный текст
+        # Парсим скрипт
+        command, description, code = parse_script_text(file_content)
+        
+        # Если код не найден через ###CODE:, используем весь файл
+        if not code.strip():
+            code = file_content
+        
+        # Режим добавления нового скрипта
         if user_id in pending_scripts:
-            pending = pending_scripts[user_id]
+            pending = pending_scripts.pop(user_id)
             
-            if pending['stage'] == 'waiting_first':
-                command, description, code = parse_script_text(file_content)
-                if command:
-                    pending['command'] = command
-                if description != "Без описания":
-                    pending['description'] = description
-                pending['code'] = code if code else file_content
-                pending['stage'] = 'waiting_more'
-            else:
-                pending['code'] += '\n' + file_content
+            # Используем команду из файла или из pending
+            final_command = command or pending.get('command')
+            final_description = description if description != "Без описания" else pending.get('description', 'Без описания')
+            
+            if not final_command:
+                await update.message.reply_text(
+                    "❌ Не указана команда в файле!\n\n"
+                    "Добавьте в начало файла:\n"
+                    "`###COMMAND: имя_команды`",
+                    parse_mode='Markdown'
+                )
+                return True
+            
+            if 'async def execute' not in code and 'def execute' not in code:
+                await update.message.reply_text("❌ Не найдена функция execute! Скрипт не сохранён.")
+                return True
+            
+            author = update.effective_user.username or str(user_id)
+            
+            # Сохраняем скрипт СРАЗУ
+            save_script_to_db(chat_id, final_command, final_description, code, author, user_id)
+            save_user(user_id, update.effective_user.username, update.effective_user.first_name)
+            save_data()
             
             await update.message.reply_text(
-                f"✅ Файл `{document.file_name}` получен!\n"
-                f"📦 Всего кода: {len(pending['code'])} символов\n\n"
-                f"📌 Команда: `{pending['command'] or 'не указана'}`\n\n"
-                f"❓ *Есть чем дополнить код?*\n"
-                f"• Отправьте ещё файл или текст\n"
-                f"• Или напишите `готово` для сохранения\n\n"
-                f"⚠️ `/cancel` - отменить",
+                f"✅ *Скрипт из файла сохранён!*\n\n"
+                f"📌 Команда: `{final_command}`\n"
+                f"📝 Описание: {final_description}\n"
+                f"📦 Размер: {len(code)} символов\n\n"
+                f"Используйте `{final_command}` в этом чате!",
                 parse_mode='Markdown'
             )
+            
+            logger.info(f"💾 Скрипт {final_command} загружен из файла пользователем {author}")
             return True
         
+        # Режим редактирования
         elif user_id in editing_scripts:
-            editing = editing_scripts[user_id]
+            editing = editing_scripts.pop(user_id)
+            edit_command = editing['command']
             
-            if editing['stage'] == 'waiting_new_code':
-                command, description, code = parse_script_text(file_content)
-                editing['code'] = code if code else file_content
-                if description != "Без описания":
-                    editing['new_description'] = description
-                editing['stage'] = 'waiting_more'
-            else:
-                editing['code'] += '\n' + file_content
+            if 'async def execute' not in code and 'def execute' not in code:
+                await update.message.reply_text("❌ Не найдена функция execute! Редактирование отменено.")
+                return True
+            
+            # Получаем текущую информацию
+            script_info = get_script_from_db(chat_id, edit_command)
+            final_description = description if description != "Без описания" else script_info['description']
+            author = script_info['author']
+            author_id = script_info.get('author_id')
+            
+            # Сохраняем СРАЗУ
+            save_script_to_db(chat_id, edit_command, final_description, code, author, author_id)
+            save_data()
             
             await update.message.reply_text(
-                f"✅ Файл `{document.file_name}` получен!\n"
-                f"📦 Всего кода: {len(editing['code'])} символов\n\n"
-                f"❓ *Есть чем дополнить код?*\n"
-                f"• Отправьте ещё файл или текст\n"
-                f"• Или напишите `готово` для сохранения\n\n"
-                f"⚠️ `/cancel` - отменить",
+                f"✅ *Скрипт обновлён из файла!*\n\n"
+                f"📌 Команда: `{edit_command}`\n"
+                f"📦 Новый размер: {len(code)} символов",
                 parse_mode='Markdown'
             )
+            
+            logger.info(f"📝 Скрипт {edit_command} обновлён из файла в чате {chat_id}")
             return True
             
     except Exception as e:
