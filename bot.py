@@ -3,7 +3,7 @@ import sqlite3
 import asyncio
 import json
 from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from datetime import datetime
 from pathlib import Path
 
@@ -1258,6 +1258,8 @@ def main():
     application.add_handler(CommandHandler("dbinfo", db_info))
     application.add_handler(CommandHandler("cancel", cancel_action))
     application.add_handler(CommandHandler("help", help_command))
+    
+    application.add_handler(CallbackQueryHandler(handle_somka_callbacks, pattern=r"^somka_"))
     
     # Обработчик документов (.txt файлы)
     application.add_handler(MessageHandler(filters.Document.ALL, document_handler))
