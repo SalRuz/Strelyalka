@@ -6,41 +6,98 @@ import asyncio
 import logging
 import subprocess
 import sys
+import importlib
+import site
 from datetime import datetime
 from pathlib import Path
 
-# --- АВТО-УСТАНОВКА ЗАВИСИМОСТЕЙ (ДЛЯ ХОСТИНГА БЕЗ ТЕРМИНАЛА) ---
-def install_dependencies():
-    print("🔄 [SYSTEM] Проверка и установка зависимостей Playwright и Node.js...")
+# ==================== БЛОК АВТО-УСТАНОВКИ ЗАВИСИМОСТЕЙ ====================
+# Этот код выполняется ДО запуска бота, чтобы скачать недостающие модули на хостинге
+
+def force_install(package_name, import_name=None):
+    """
+    Устанавливает пакет через pip и заставляет Python увидеть его без перезагрузки.
+    """
+    if import_name is None:
+        import_name = package_name
+        
     try:
-        # 1. Установка браузеров Playwright
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-        # 2. Установка системных зависимостей (может требовать sudo, но пробуем)
-        subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=False) 
+        importlib.import_module(import_name)
+        return True # Уже установлен
+    except ImportError:
+        print(f"🔄 [SYSTEM] Модуль '{import_name}' не найден. Устанавливаю {package_name}...")
         
-        # 3. Установка Mineflayer (Node.js)
-        if not os.path.exists("node_modules"):
-            print("🔄 [SYSTEM] Установка Mineflayer (npm)...")
-            subprocess.run(["npm", "install", "mineflayer"], shell=True, check=False)
-        
-        print("✅ [SYSTEM] Зависимости установлены.")
-    except Exception as e:
-        print(f"⚠️ [SYSTEM] Ошибка установки зависимостей (если бот работает, игнорируйте): {e}")
+        try:
+            # 1. Установка через pip
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+            
+            # 2. Обновляем пути (sys.path), чтобы Python увидел новые файлы
+            importlib.invalidate_caches()
+            
+            # Хак: находим, куда pip установил пакеты (обычно site-packages) и добавляем в sys.path
+            user_site = site.getusersitepackages()
+            if user_site not in sys.path:
+                sys.path.append(user_site)
+            
+            # Пробуем импортировать снова
+            importlib.import_module(import_name)
+            print(f"✅ [SYSTEM] {package_name} успешно установлен и загружен!")
+            return True
+        except Exception as e:
+            print(f"❌ [SYSTEM] Ошибка установки {package_name}: {e}")
+            return False
 
-# Запускаем установку ПЕРЕД импортом библиотек
-install_dependencies()
+def install_playwright_browsers():
+    """Отдельная установка браузеров для Playwright"""
+    # Сначала убедимся, что пакет стоит
+    if force_install("playwright"):
+        print("🔄 [SYSTEM] Проверка наличия браузеров Playwright...")
+        try:
+            # Команда установки браузера Chromium
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+            print("✅ [SYSTEM] Браузер Chromium готов к работе.")
+        except Exception as e:
+            print(f"⚠️ [SYSTEM] Не удалось запустить установку браузеров (возможно, уже установлены): {e}")
 
-# --- ИМПОРТЫ ПОСЛЕ УСТАНОВКИ ---
+def install_node_deps():
+    """Установка Mineflayer (Node.js) для прыгающего бота"""
+    if not os.path.exists("node_modules"):
+        print("🔄 [SYSTEM] Установка Mineflayer (npm)...")
+        try:
+            subprocess.run("npm install mineflayer", shell=True, check=False)
+            print("✅ [SYSTEM] Mineflayer установлен.")
+        except Exception as e:
+            print(f"⚠️ [SYSTEM] Ошибка npm (убедитесь, что Node.js установлен на хостинге): {e}")
+
+# --- ЗАПУСК УСТАНОВКИ ПРИ СТАРТЕ ---
+print("🚀 [BOOT] Проверка окружения...")
+force_install("playwright")
+force_install("javascript")
+force_install("aiosqlite")
+
+# Устанавливаем бинарники браузеров и JS модули
+install_playwright_browsers()
+install_node_deps()
+
+# --- БЕЗОПАСНЫЙ ИМПОРТ ---
+# Мы не крашим бота, если импорт не прошел сразу. Мы попробуем импортировать внутри функций скриптов.
 try:
     from playwright.async_api import async_playwright
+except ImportError:
+    async_playwright = None
+
+try:
     import javascript
     from javascript import require, On, Once
-except ImportError as e:
-    print(f"❌ Критическая ошибка: Не удалось импортировать модули даже после установки: {e}")
-    # Пытаемся продолжить, но скрипты Aternos могут падать
-    async_playwright = None
+except ImportError:
     javascript = None
     require = None
+    On = None
+    Once = None
+
+print("✅ [BOOT] Загрузка основного бота...")
+
+# ==================== ОСНОВНОЙ КОД БОТА ====================
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
@@ -337,10 +394,8 @@ bot_state = {}
 load_data()
 
 # Состояния для многочастной загрузки скриптов
-# {user_id: {'chat_id': str, 'code': str, 'command': str, 'description': str, 'stage': str}}
 pending_scripts = {}
-
-# Состояния редактирования {user_id: {'chat_id': str, 'command': str, 'stage': str}}
+# Состояния редактирования
 editing_scripts = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -723,7 +778,7 @@ async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     return True
 
 async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выполнение кастомного скрипта"""
+    """Выполнение кастомного скрипта с динамической подгрузкой модулей"""
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     message_text = update.message.text
@@ -749,6 +804,33 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
     script_code = script_info['code']
     
     try:
+        # --- БЛОК ОБЕСПЕЧЕНИЯ ЗАВИСИМОСТЕЙ ---
+        # Если при старте модули не загрузились, пробуем получить их сейчас
+        global async_playwright, javascript, require, On, Once
+        
+        # Попытка дозагрузки Playwright
+        if async_playwright is None:
+             if 'playwright' not in sys.modules:
+                 force_install('playwright')
+             try:
+                 import playwright.async_api
+                 async_playwright = playwright.async_api.async_playwright
+             except:
+                 pass
+
+        # Попытка дозагрузки Javascript (для Mineflayer)
+        if javascript is None:
+            if 'javascript' not in sys.modules:
+                force_install('javascript')
+            try:
+                import javascript as js_mod
+                javascript = js_mod
+                require = js_mod.require
+                On = js_mod.On
+                Once = js_mod.Once
+            except:
+                pass
+
         # Создаем локальное пространство имен с полным доступом
         import builtins
         local_namespace = {
@@ -760,12 +842,12 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'DB_PATH': DB_PATH,    # Доступ к пути БД
             'InlineKeyboardButton': InlineKeyboardButton,  # Для inline-кнопок
             'InlineKeyboardMarkup': InlineKeyboardMarkup,  # Для разметки кнопок
-            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+            # Передаем объекты Aternos
+            'async_playwright': async_playwright,
             'javascript': javascript,
             'require': require,
             'On': On,
-            'Once': Once,
-            'async_playwright': async_playwright
+            'Once': Once
         }
         
         # Добавляем telegram классы
@@ -789,7 +871,7 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
             'html', 'xml', 'email', 'mimetypes', 'socket', 'ssl',
             'threading', 'multiprocessing', 'queue', 'concurrent',
-            # --- ДОБАВЛЕНЫ ДЛЯ БЕЗОПАСНОСТИ ---
+            # Важные для Aternos
             'playwright', 'javascript'
         ]
         
@@ -925,6 +1007,10 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
         
         try:
+            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+            # Здесь так же нужно пробросить зависимости, чтобы триггеры могли их использовать
+            global async_playwright, javascript, require, On, Once
+            
             import builtins
             local_namespace = {
                 '__builtins__': builtins,
@@ -932,12 +1018,11 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'context': context,
                 'DATA_DIR': DATA_DIR,
                 'DB_PATH': DB_PATH,
-                # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+                'async_playwright': async_playwright,
                 'javascript': javascript,
                 'require': require,
                 'On': On,
-                'Once': Once,
-                'async_playwright': async_playwright
+                'Once': Once
             }
             
             # Импортируем модули
@@ -989,6 +1074,9 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             continue
         
         try:
+            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+            global async_playwright, javascript, require, On, Once
+            
             import builtins
             local_namespace = {
                 '__builtins__': builtins,
@@ -1000,12 +1088,11 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 'DB_PATH': DB_PATH,
                 'InlineKeyboardButton': InlineKeyboardButton,
                 'InlineKeyboardMarkup': InlineKeyboardMarkup,
-                # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+                'async_playwright': async_playwright,
                 'javascript': javascript,
                 'require': require,
                 'On': On,
-                'Once': Once,
-                'async_playwright': async_playwright
+                'Once': Once
             }
             
             # Импортируем ВСЕ популярные модули
