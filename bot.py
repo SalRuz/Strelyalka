@@ -8,98 +8,106 @@ import subprocess
 import sys
 import importlib
 import site
+import shutil
 from datetime import datetime
 from pathlib import Path
 
-# ==================== БЛОК АВТО-УСТАНОВКИ (SYSTEM BOOT) ====================
-# Этот блок выполняется ПЕРЕД загрузкой телеграма, чтобы подготовить среду
+# ==================== БЛОК БЕЗОПАСНОЙ ЗАГРУЗКИ (SYSTEM BOOT) ====================
+
+def check_node_installed():
+    """Проверяет наличие Node.js. Если его нет, Mineflayer будет отключен."""
+    node_path = shutil.which("node") or shutil.which("nodejs")
+    if node_path:
+        print(f"✅ [SYSTEM] Node.js найден: {node_path}")
+        return True
+    else:
+        print("⚠️ [SYSTEM] Node.js НЕ НАЙДЕН. Скрипты с Mineflayer/Javascript работать не будут.")
+        return False
 
 def force_install(package_name, import_name=None):
-    """
-    Устанавливает пакет через pip и заставляет Python увидеть его без перезагрузки.
-    """
+    """Устанавливает пакет через pip внутри скрипта"""
     if import_name is None:
         import_name = package_name
-        
+    
     try:
         importlib.import_module(import_name)
-        return True # Уже установлен
+        return True
     except ImportError:
-        print(f"🔄 [SYSTEM] Модуль '{import_name}' не найден. Устанавливаю {package_name}...")
+        pass 
+
+    # Если это javascript либа, но нет Node.js - пропускаем установку, чтобы не крашить pip
+    if package_name == "javascript" and not HAS_NODE:
+        print("⛔ [SYSTEM] Пропуск установки 'javascript' (нет Node.js на хостинге)")
+        return False
+
+    print(f"🔄 [SYSTEM] Устанавливаю {package_name}...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+        importlib.invalidate_caches()
         
-        try:
-            # 1. Установка через pip
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+        user_site = site.getusersitepackages()
+        if user_site not in sys.path:
+            sys.path.append(user_site)
             
-            # 2. Обновляем пути (sys.path), чтобы Python увидел новые файлы
-            importlib.invalidate_caches()
-            
-            # Хак: находим, куда pip установил пакеты (обычно site-packages) и добавляем в sys.path
-            user_site = site.getusersitepackages()
-            if user_site not in sys.path:
-                sys.path.append(user_site)
-            
-            # Пробуем импортировать снова
-            importlib.import_module(import_name)
-            print(f"✅ [SYSTEM] {package_name} успешно установлен и загружен!")
-            return True
-        except Exception as e:
-            print(f"❌ [SYSTEM] Ошибка установки {package_name}: {e}")
-            return False
+        importlib.import_module(import_name)
+        print(f"✅ [SYSTEM] {package_name} установлен.")
+        return True
+    except Exception as e:
+        print(f"❌ [SYSTEM] Ошибка установки {package_name}: {e}")
+        return False
 
-def install_playwright_browsers():
-    """Отдельная установка браузеров для Playwright"""
-    if force_install("playwright"):
-        print("🔄 [SYSTEM] Проверка наличия браузеров Playwright...")
-        try:
-            # Команда установки браузера Chromium
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
-            print("✅ [SYSTEM] Браузер Chromium готов.")
-        except Exception as e:
-            print(f"⚠️ [SYSTEM] Не удалось запустить установку браузеров: {e}")
+def install_browsers():
+    """Установка браузеров Playwright"""
+    if not HAS_PLAYWRIGHT: return
+    print("🔄 [SYSTEM] Проверка браузеров Chromium...")
+    try:
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
+    except Exception as e:
+        print(f"⚠️ [SYSTEM] Ошибка установки браузера: {e}")
 
-def install_node_deps():
-    """Установка Mineflayer (Node.js)"""
-    if not os.path.exists("node_modules"):
-        print("🔄 [SYSTEM] Установка Mineflayer (npm)...")
-        try:
-            subprocess.run("npm install mineflayer", shell=True, check=False)
-            print("✅ [SYSTEM] Mineflayer установлен.")
-        except Exception as e:
-            print(f"⚠️ [SYSTEM] Ошибка npm (убедитесь, что Node.js установлен на хостинге): {e}")
+# --- ЗАПУСК ПРОВЕРОК ---
+print("🚀 [BOOT] Инициализация системы...")
 
-# --- ЗАПУСК УСТАНОВКИ ---
-print("🚀 [BOOT] Подготовка библиотек...")
-force_install("playwright")
-force_install("javascript")
+# 1. Проверяем наличие Node.js
+HAS_NODE = check_node_installed()
+
+# 2. Устанавливаем Python библиотеки
 force_install("aiosqlite")
+HAS_PLAYWRIGHT = force_install("playwright", "playwright.async_api")
+HAS_JS_LIB = force_install("javascript")
 
-# Устанавливаем тяжелые зависимости
-install_playwright_browsers()
-install_node_deps()
+# 3. Докачиваем браузеры (если Playwright встал)
+if HAS_PLAYWRIGHT:
+    install_browsers()
 
-# --- ПРЕДВАРИТЕЛЬНАЯ ЗАГРУЗКА ---
+# 4. Импортируем библиотеки (безопасно, чтобы не упасть)
+async_playwright = None
+javascript = None
+require = None
+On = None
+Once = None
+
 try:
-    from playwright.async_api import async_playwright
+    if HAS_PLAYWRIGHT:
+        from playwright.async_api import async_playwright
 except ImportError:
-    async_playwright = None
+    pass
 
 try:
-    import javascript
-    from javascript import require, On, Once
-except ImportError:
-    javascript = None
-    require = None
-    On = None
-    Once = None
+    if HAS_JS_LIB and HAS_NODE:
+        import javascript
+        from javascript import require, On, Once
+except Exception as e:
+    print(f"⚠️ [BOOT] Мост JS не загружен (возможно, старая версия Node): {e}")
+    HAS_NODE = False # Отключаем JS фичи при ошибке импорта
 
-print("✅ [BOOT] Библиотеки загружены. Запуск Telegram бота...")
+print("✅ [BOOT] Среда готова. Запуск Telegram бота...")
 
 # ==================== ОСНОВНОЙ КОД БОТА ====================
 
-# ВОТ ТУТ ВСЕ ВАЖНЫЕ ИМПОРТЫ, КОТОРЫЕ Я РАНЬШЕ СЛУЧАЙНО УДАЛИЛ
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.constants import ParseMode
 
 # Настройка логирования
 logging.basicConfig(
@@ -114,18 +122,15 @@ BOT_TOKEN = "8271478255:AAF5FoF5cujDdbQjuZJesIjyghwgobUgixQ"
 # Путь к папке data
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-# Путь к базе данных
 DB_PATH = DATA_DIR / "bot.db"
 
-# ==================== СИСТЕМА ХРАНЕНИЯ ДАННЫХ ====================
+# ==================== СИСТЕМА ХРАНЕНИЯ ДАННЫХ (БД) ====================
 
 def init_database():
     """Инициализация базы данных"""
     conn = sqlite3.connect(str(DB_PATH))
     cursor = conn.cursor()
     
-    # Таблица скриптов
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS scripts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,7 +146,6 @@ def init_database():
         )
     ''')
     
-    # Таблица пользователей
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -152,7 +156,6 @@ def init_database():
         )
     ''')
     
-    # Таблица состояния бота (для глобальных настроек)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bot_state (
             key TEXT PRIMARY KEY,
@@ -160,7 +163,6 @@ def init_database():
         )
     ''')
     
-    # Таблица логов выполнения
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS execution_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,15 +180,11 @@ def init_database():
     logger.info(f"✅ База данных инициализирована: {DB_PATH}")
 
 def get_db_connection():
-    """Получить соединение с БД"""
     return sqlite3.connect(str(DB_PATH))
 
 def load_data():
-    """Загрузка всех данных из БД"""
     global scripts_registry, users_data, bot_state
-    
     init_database()
-    
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -217,29 +215,22 @@ def load_data():
                 'first_name': first_name,
                 'data': json.loads(data) if data else {}
             }
-        except Exception as e:
-            logger.error(f"Ошибка загрузки пользователя {user_id}: {e}")
+        except: pass
     
-    # Загрузка состояния бота
+    # Загрузка состояния
     bot_state = {}
     cursor.execute("SELECT key, value FROM bot_state")
     for row in cursor.fetchall():
-        try:
-            bot_state[row[0]] = json.loads(row[1])
-        except:
-            bot_state[row[0]] = row[1]
+        try: bot_state[row[0]] = json.loads(row[1])
+        except: bot_state[row[0]] = row[1]
     
     conn.close()
     logger.info(f"📦 Загружено скриптов: {sum(len(s) for s in scripts_registry.values())}")
-    logger.info(f"👥 Загружено пользователей: {len(users_data)}")
 
 def save_data():
-    """Сохранение всех данных в БД"""
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
-        # Сохранение скриптов
         for chat_id, scripts in scripts_registry.items():
             for command, info in scripts.items():
                 cursor.execute('''
@@ -250,8 +241,6 @@ def save_data():
                     str(chat_id), command, info.get('description', 'Без описания'),
                     info['code'], info.get('author'), info.get('author_id')
                 ))
-        
-        # Сохранение пользователей
         for user_id, info in users_data.items():
             cursor.execute('''
                 INSERT OR REPLACE INTO users (user_id, username, first_name, data)
@@ -260,25 +249,12 @@ def save_data():
                 user_id, info.get('username'), info.get('first_name'),
                 json.dumps(info.get('data', {}), ensure_ascii=False)
             ))
-        
-        # Сохранение состояния бота
-        def save_state(key, value):
-            cursor.execute(
-                "INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)",
-                (key, json.dumps(value, ensure_ascii=False))
-            )
-        
-        for key, value in bot_state.items():
-            save_state(key, value)
-        
         conn.commit()
         conn.close()
-        logger.debug("💾 Данные сохранены в SQLite.")
     except Exception as e:
-        logger.error(f"❌ Ошибка сохранения в SQLite: {e}")
+        logger.error(f"❌ Ошибка сохранения: {e}")
 
 def save_script_to_db(chat_id, command, description, code, author, author_id=None):
-    """Сохранение скрипта в БД"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
@@ -288,7 +264,6 @@ def save_script_to_db(chat_id, command, description, code, author, author_id=Non
     conn.commit()
     conn.close()
     
-    # Обновляем кэш
     if chat_id not in scripts_registry:
         scripts_registry[chat_id] = {}
     scripts_registry[chat_id][command] = {
@@ -300,7 +275,6 @@ def save_script_to_db(chat_id, command, description, code, author, author_id=Non
     }
 
 def delete_script_from_db(chat_id, command):
-    """Удаление скрипта из БД"""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM scripts WHERE chat_id = ? AND command = ?", (str(chat_id), command))
@@ -308,141 +282,102 @@ def delete_script_from_db(chat_id, command):
     conn.commit()
     conn.close()
     
-    # Обновляем кэш
     if deleted and chat_id in scripts_registry and command in scripts_registry[chat_id]:
         del scripts_registry[chat_id][command]
-    
     return deleted
 
 def get_script_from_db(chat_id, command):
-    """Получение скрипта из БД"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT description, code, author, author_id, created_at, updated_at FROM scripts WHERE chat_id = ? AND command = ?",
-        (str(chat_id), command)
-    )
+    cursor.execute("SELECT description, code, author, author_id, created_at, updated_at FROM scripts WHERE chat_id = ? AND command = ?", (str(chat_id), command))
     row = cursor.fetchone()
     conn.close()
     if row:
-        return {
-            'description': row[0],
-            'code': row[1],
-            'author': row[2],
-            'author_id': row[3],
-            'created': row[4],
-            'updated': row[5]
-        }
+        return {'description': row[0], 'code': row[1], 'author': row[2], 'author_id': row[3], 'created': row[4], 'updated': row[5]}
     return None
 
 def get_chat_scripts(chat_id):
-    """Получение всех скриптов чата"""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT command, description, author FROM scripts WHERE chat_id = ?",
-        (str(chat_id),)
-    )
+    cursor.execute("SELECT command, description, author FROM scripts WHERE chat_id = ?", (str(chat_id),))
     scripts = {row[0]: {'description': row[1], 'author': row[2]} for row in cursor.fetchall()}
     conn.close()
     return scripts
 
 def log_execution(chat_id, user_id, command, success, error_message=None):
-    """Логирование выполнения скрипта"""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO execution_logs (chat_id, user_id, command, success, error_message)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (str(chat_id), user_id, command, 1 if success else 0, error_message))
+        conn.execute('INSERT INTO execution_logs (chat_id, user_id, command, success, error_message) VALUES (?, ?, ?, ?, ?)',
+                     (str(chat_id), user_id, command, 1 if success else 0, error_message))
         conn.commit()
         conn.close()
-    except:
-        pass
+    except: pass
 
 def save_user(user_id, username, first_name, extra_data=None):
-    """Сохранение информации о пользователе"""
     try:
         if user_id not in users_data:
             users_data[user_id] = {'username': username, 'first_name': first_name, 'data': {}}
         else:
             users_data[user_id]['username'] = username
             users_data[user_id]['first_name'] = first_name
-        
-        if extra_data:
-            users_data[user_id]['data'].update(extra_data)
+        if extra_data: users_data[user_id]['data'].update(extra_data)
         
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT OR REPLACE INTO users (user_id, username, first_name, data)
-            VALUES (?, ?, ?, ?)
-        ''', (user_id, username, first_name, json.dumps(users_data[user_id].get('data', {}), ensure_ascii=False)))
+        conn.execute('INSERT OR REPLACE INTO users (user_id, username, first_name, data) VALUES (?, ?, ?, ?)',
+                     (user_id, username, first_name, json.dumps(users_data[user_id].get('data', {}), ensure_ascii=False)))
         conn.commit()
         conn.close()
-    except Exception as e:
-        logger.error(f"Ошибка сохранения пользователя: {e}")
+    except: pass
 
-# Глобальные переменные
+# --- ПЕРЕМЕННЫЕ СОСТОЯНИЯ ---
 scripts_registry = {}
 users_data = {}
 bot_state = {}
-
-# Загружаем данные при старте
 load_data()
-
-# Состояния для многочастной загрузки скриптов
 pending_scripts = {}
-# Состояния редактирования
 editing_scripts = {}
+
+# ==================== ХЕНДЛЕРЫ ТЕЛЕГРАМ ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Приветственное сообщение"""
+    status_text = "✅" if HAS_NODE else "❌ (Скрипты Aternos работать не будут, нужен Node.js)"
     await update.message.reply_text(
-        "🤖 *Привет! Я бот с кастомными скриптами!*\n\n"
-        "📌 *Доступные команды:*\n"
-        "`/addscript` - Добавить новый скрипт\n"
-        "`/listscripts` - Список скриптов чата\n"
-        "`/viewscript <команда>` - Посмотреть код\n"
-        "`/editscript <команда>` - Редактировать скрипт\n"
-        "`/deletescript <команда>` - Удалить скрипт\n"
-        "`/cancel` - Отменить текущее действие\n"
-        "`/help` - Помощь\n\n"
-        "💡 Вы можете создавать свои команды!",
+        f"🤖 *Привет! Я бот с кастомными скриптами!*\n\n"
+        f"📌 *Доступные команды:*\n"
+        f"`/addscript` - Добавить новый скрипт\n"
+        f"`/listscripts` - Список скриптов чата\n"
+        f"`/viewscript <команда>` - Посмотреть код\n"
+        f"`/editscript <команда>` - Редактировать скрипт\n"
+        f"`/deletescript <команда>` - Удалить скрипт\n"
+        f"`/cancel` - Отменить текущее действие\n"
+        f"`/help` - Помощь\n\n"
+        f"⚙️ Статус Node.js: {status_text}\n"
+        f"💡 Вы можете создавать свои команды!",
         parse_mode='Markdown'
     )
 
 async def cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Отмена текущего действия"""
-    user_id = update.effective_user.id
+    uid = update.effective_user.id
     cancelled = False
-    
-    if user_id in pending_scripts:
-        del pending_scripts[user_id]
+    if uid in pending_scripts:
+        del pending_scripts[uid]
         cancelled = True
-    if user_id in editing_scripts:
-        del editing_scripts[user_id]
+    if uid in editing_scripts:
+        del editing_scripts[uid]
         cancelled = True
     
     if cancelled:
         await update.message.reply_text("❌ Действие отменено.")
     else:
-        await update.message.reply_text("ℹ️ Нет активных действий для отмены.")
+        await update.message.reply_text("ℹ️ Нет активных действий.")
 
 async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало процесса добавления скрипта"""
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
-    
     pending_scripts[user_id] = {
-        'chat_id': chat_id,
-        'code': '',
-        'command': None,
-        'description': 'Без описания',
-        'stage': 'waiting_first'
+        'chat_id': chat_id, 'code': '', 'command': None, 'description': 'Без описания', 'stage': 'waiting_first'
     }
-    
     await update.message.reply_text(
         "📝 *Отправьте скрипт в следующем формате:*\n\n"
         "```\n"
@@ -451,10 +386,7 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "###CODE:\n"
         "# Ваш Python код здесь\n"
         "async def execute(update, context, args):\n"
-        "    return 'Результат'\n\n"
-        "Если в скрипте есть база данных, то использовать строго SQlite.\n\n"
-        "Если в скрипте есть подкоманды, то использовать их строго после основной команды, пример: /kod start, /kod stop.\n\n"
-        "Если в скрипте есть отчет времени, то использовать для него строго отдельную def функцию."
+        "    return 'Результат'\n"
         "```\n\n"
         "📌 Можно отправлять код частями!\n"
         "⚠️ `/cancel` - отменить",
@@ -462,715 +394,330 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def view_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Просмотр исходного кода скрипта"""
     chat_id = str(update.effective_chat.id)
-    
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Укажите команду: `/viewscript /команда`",
-            parse_mode='Markdown'
-        )
-        return
+    if not context.args: return await update.message.reply_text("❌ Укажите команду: `/viewscript /команда`", parse_mode='Markdown')
     
     command = context.args[0].lower()
-    if not command.startswith('/'):
-        command = '/' + command
+    if not command.startswith('/'): command = '/' + command
     
-    # Получаем скрипт из БД
     script_info = get_script_from_db(chat_id, command)
-    
-    if not script_info:
-        await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
-        return
+    if not script_info: return await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
     
     code = script_info['code']
-    author = script_info.get('author', 'Unknown')
-    description = script_info.get('description', 'Без описания')
-    created = script_info.get('created', 'N/A')
-    updated = script_info.get('updated', 'N/A')
-    
-    # Формируем заголовок
-    header = (
-        f"📄 *Скрипт:* `{command}`\n"
-        f"👤 *Автор:* @{author}\n"
-        f"📝 *Описание:* {description}\n"
-        f"📅 *Создан:* {created[:10] if created else 'N/A'}\n"
-        f"🔄 *Обновлён:* {updated[:10] if updated else 'N/A'}\n"
-        f"📦 *Размер:* {len(code)} символов\n"
-    )
-    
-    # Если код большой - отправляем как txt файл
-    max_code_len = 3000
-    
-    if len(code) > max_code_len:
-        # Создаём txt файл
-        file_content = f"""# Скрипт: {command}
-# Автор: @{author}
-# Описание: {description}
-# Создан: {created}
-# Обновлён: {updated}
-# ========================================
-
-{code}
-"""
-        # Создаём файл в памяти
-        file_buffer = io.BytesIO(file_content.encode('utf-8'))
-        file_buffer.name = f"script_{command.replace('/', '')}.txt"
-        
-        await update.message.reply_text(header + "\n📎 Код отправлен файлом (слишком большой):", parse_mode='Markdown')
-        await update.message.reply_document(
-            document=file_buffer,
-            filename=file_buffer.name,
-            caption=f"📄 Исходный код {command}"
-        )
+    if len(code) > 3000:
+        f = io.BytesIO(code.encode('utf-8'))
+        f.name = f"{command}.txt"
+        await update.message.reply_document(f, caption=f"📄 Исходный код {command}")
     else:
-        # Код небольшой - отправляем в сообщении
-        try:
-            await update.message.reply_text(
-                header + f"\n```python\n{code}\n```",
-                parse_mode='Markdown'
-            )
-        except Exception:
-            # Если Markdown не работает, отправляем файлом
-            file_buffer = io.BytesIO(code.encode('utf-8'))
-            file_buffer.name = f"script_{command.replace('/', '')}.txt"
-            await update.message.reply_text(header, parse_mode='Markdown')
-            await update.message.reply_document(document=file_buffer, filename=file_buffer.name)
+        await update.message.reply_text(f"📄 *Скрипт:* `{command}`\n```python\n{code}\n```", parse_mode='Markdown')
 
 async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало редактирования скрипта"""
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
-    
-    if not context.args:
-        await update.message.reply_text(
-            "❌ Укажите команду: `/editscript /команда`",
-            parse_mode='Markdown'
-        )
-        return
+    if not context.args: return await update.message.reply_text("❌ Укажите команду: `/editscript /команда`", parse_mode='Markdown')
     
     command = context.args[0].lower()
-    if not command.startswith('/'):
-        command = '/' + command
+    if not command.startswith('/'): command = '/' + command
     
-    # Получаем скрипт из БД
     script_info = get_script_from_db(chat_id, command)
+    if not script_info: return await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
     
-    if not script_info:
-        await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
-        return
-    
-    current_code = script_info['code']
-    
-    editing_scripts[user_id] = {
-        'chat_id': chat_id,
-        'command': command,
-        'code': '',
-        'stage': 'waiting_new_code'
-    }
-    
-    await update.message.reply_text(
-        f"✏️ *Редактирование* `{command}`\n\n"
-        f"📝 Текущее описание: {script_info['description']}\n\n"
-        f"Отправьте *новый код полностью* (можно частями).\n"
-        f"Формат такой же как при добавлении.\n\n"
-        f"⚠️ `/cancel` - отменить",
-        parse_mode='Markdown'
-    )
-    
-    # Отправляем текущий код для справки
-    if len(current_code) > 3500:
-        await update.message.reply_text("📄 Текущий код (начало):\n```python\n" + current_code[:3500] + "\n...\n```", parse_mode='Markdown')
-    else:
-        await update.message.reply_text("📄 Текущий код:\n```python\n" + current_code + "\n```", parse_mode='Markdown')
+    editing_scripts[user_id] = {'chat_id': chat_id, 'command': command, 'code': '', 'stage': 'waiting_new_code'}
+    await update.message.reply_text(f"✏️ *Редактирование* `{command}`. Отправьте новый код.", parse_mode='Markdown')
 
 def parse_script_text(text):
-    """Парсинг текста скрипта, возвращает (command, description, code)"""
     lines = text.strip().split('\n')
     command = None
     description = "Без описания"
     code_lines = []
     in_code = False
-    
     for line in lines:
         if line.startswith('###COMMAND:'):
             command = line.replace('###COMMAND:', '').strip().lower()
-            if command and not command.startswith('/'):
-                command = '/' + command
+            if command and not command.startswith('/'): command = '/' + command
         elif line.startswith('###DESCRIPTION:'):
             description = line.replace('###DESCRIPTION:', '').strip()
         elif line.startswith('###CODE:'):
             in_code = True
         elif in_code:
             code_lines.append(line)
-    
-    code = '\n'.join(code_lines)
-    return command, description, code
+    return command, description, '\n'.join(code_lines)
 
 async def handle_script_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженного скрипта (многочастная загрузка)"""
     user_id = update.effective_user.id
     text = update.message.text
     
-    # Проверяем режим редактирования
     if user_id in editing_scripts:
-        return await handle_edit_upload(update, context)
-    
-    # Проверяем режим добавления
-    if user_id not in pending_scripts:
-        return False
-    
-    pending = pending_scripts[user_id]
-    chat_id = pending['chat_id']
-    
-    # Проверяем ответ "нет" / "да" / "готово"
-    lower_text = text.lower().strip()
-    if lower_text in ['нет', 'no', 'готово', 'done', 'сохранить', 'save']:
-        # Финализируем скрипт
-        return await finalize_script(update, context, user_id)
-    
-    if lower_text in ['да', 'yes', 'ещё', 'еще', 'more']:
-        await update.message.reply_text("📝 Отправьте продолжение кода:")
-        return True
-    
-    # Добавляем код
-    if pending['stage'] == 'waiting_first':
-        # Первая часть - парсим заголовки
-        command, description, code = parse_script_text(text)
-        if command:
-            pending['command'] = command
-        if description != "Без описания":
-            pending['description'] = description
-        pending['code'] = code if code else text
-        pending['stage'] = 'waiting_more'
-    else:
-        # Дополнительные части - просто добавляем
-        pending['code'] += '\n' + text
-    
-    await update.message.reply_text(
-        f"✅ Код получен! (всего {len(pending['code'])} символов)\n\n"
-        f"📌 Команда: `{pending['command'] or 'не указана'}`\n\n"
-        f"❓ *Есть чем дополнить код?*\n"
-        f"• Отправьте продолжение кода\n"
-        f"• Или напишите `нет` / `готово` для сохранения\n\n"
-        f"⚠️ `/cancel` - отменить",
-        parse_mode='Markdown'
-    )
-    
-    return True
+        # ЛОГИКА РЕДАКТИРОВАНИЯ
+        editing = editing_scripts[user_id]
+        lower = text.lower().strip()
+        
+        if lower in ['готово', 'done', 'save', 'сохранить']:
+            if not editing['code'].strip(): return await update.message.reply_text("❌ Код пустой!")
+            sinfo = get_script_from_db(editing['chat_id'], editing['command'])
+            save_script_to_db(editing['chat_id'], editing['command'], editing.get('desc', sinfo['description']), editing['code'], sinfo['author'], sinfo['author_id'])
+            save_data()
+            del editing_scripts[user_id]
+            return await update.message.reply_text(f"✅ Скрипт `{editing['command']}` обновлен!", parse_mode='Markdown')
+            
+        if lower in ['да', 'yes', 'ещё', 'еще']:
+             return await update.message.reply_text("📝 Жду продолжение кода...")
 
-async def handle_edit_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загрузки при редактировании"""
-    user_id = update.effective_user.id
-    text = update.message.text
-    
-    if user_id not in editing_scripts:
-        return False
-    
-    editing = editing_scripts[user_id]
-    
-    lower_text = text.lower().strip()
-    if lower_text in ['нет', 'no', 'готово', 'done', 'сохранить', 'save']:
-        return await finalize_edit(update, context, user_id)
-    
-    if lower_text in ['да', 'yes', 'ещё', 'еще', 'more']:
-        await update.message.reply_text("📝 Отправьте продолжение кода:")
+        if editing['stage'] == 'waiting_new_code':
+            c, d, code = parse_script_text(text)
+            editing['code'] = code if code else text
+            if d != "Без описания": editing['desc'] = d
+            editing['stage'] = 'more'
+        else:
+            editing['code'] += '\n' + text
+        await update.message.reply_text(f"✅ Код получен. Напишите `готово` для сохранения или отправьте еще часть.", parse_mode='Markdown')
         return True
-    
-    # Добавляем код
-    if editing['stage'] == 'waiting_new_code':
-        command, description, code = parse_script_text(text)
-        editing['code'] = code if code else text
-        if description != "Без описания":
-            editing['new_description'] = description
-        editing['stage'] = 'waiting_more'
-    else:
-        editing['code'] += '\n' + text
-    
-    await update.message.reply_text(
-        f"✅ Код получен! (всего {len(editing['code'])} символов)\n\n"
-        f"❓ *Есть чем дополнить код?*\n"
-        f"• Отправьте продолжение\n"
-        f"• Или напишите `нет` / `готово` для сохранения\n\n"
-        f"⚠️ `/cancel` - отменить",
-        parse_mode='Markdown'
-    )
-    
-    return True
 
-async def finalize_script(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    """Финализация и сохранение нового скрипта"""
-    pending = pending_scripts.pop(user_id)
-    chat_id = pending['chat_id']
-    code = pending['code']
-    command = pending['command']
-    description = pending['description']
-    author = update.effective_user.username or str(user_id)
-    author_id = user_id
-    
-    if not command:
-        await update.message.reply_text("❌ Не указана команда (###COMMAND:)! Скрипт не сохранён.")
-        return True
-    
-    if 'async def execute' not in code and 'def execute' not in code:
-        await update.message.reply_text("❌ Не найдена функция execute! Скрипт не сохранён.")
-        return True
-    
-    # Сохранение скрипта в БД
-    save_script_to_db(chat_id, command, description, code, author, author_id)
-    
-    # Сохраняем пользователя
-    save_user(user_id, update.effective_user.username, update.effective_user.first_name)
-    
-    # Сохраняем все данные
-    save_data()
-    
-    await update.message.reply_text(
-        f"✅ *Скрипт успешно сохранён!*\n\n"
-        f"📌 Команда: `{command}`\n"
-        f"📝 Описание: {description}\n"
-        f"📦 Размер: {len(code)} символов\n\n"
-        f"Теперь вы можете использовать `{command}` в этом чате!",
-        parse_mode='Markdown'
-    )
-    
-    logger.info(f"💾 Скрипт {command} сохранён пользователем {author} в чате {chat_id}")
-    
-    return True
+    if user_id in pending_scripts:
+        # ЛОГИКА ДОБАВЛЕНИЯ
+        pending = pending_scripts[user_id]
+        lower = text.lower().strip()
+        
+        if lower in ['готово', 'done', 'save', 'сохранить']:
+            if not pending['command']: return await update.message.reply_text("❌ Не указана команда (###COMMAND:)!")
+            save_script_to_db(pending['chat_id'], pending['command'], pending['description'], pending['code'], update.effective_user.username, user_id)
+            save_data()
+            del pending_scripts[user_id]
+            return await update.message.reply_text(f"✅ Скрипт `{pending['command']}` сохранен!", parse_mode='Markdown')
+            
+        if lower in ['да', 'yes', 'ещё', 'еще']:
+             return await update.message.reply_text("📝 Жду продолжение кода...")
 
-async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    """Финализация редактирования скрипта"""
-    editing = editing_scripts.pop(user_id)
-    chat_id = editing['chat_id']
-    command = editing['command']
-    code = editing['code']
-    
-    if not code.strip():
-        await update.message.reply_text("❌ Пустой код! Редактирование отменено.")
+        if pending['stage'] == 'waiting_first':
+            c, d, code = parse_script_text(text)
+            if c: pending['command'] = c
+            if d != "Без описания": pending['description'] = d
+            pending['code'] = code if code else text
+            pending['stage'] = 'more'
+        else:
+            pending['code'] += '\n' + text
+        await update.message.reply_text(f"✅ Код получен. Напишите `готово` для сохранения или отправьте еще часть.", parse_mode='Markdown')
         return True
-    
-    if 'async def execute' not in code and 'def execute' not in code:
-        await update.message.reply_text("❌ Не найдена функция execute! Редактирование отменено.")
-        return True
-    
-    # Получаем текущую информацию о скрипте
-    script_info = get_script_from_db(chat_id, command)
-    description = editing.get('new_description', script_info['description'])
-    author = script_info['author']
-    author_id = script_info.get('author_id')
-    
-    # Сохраняем в БД
-    save_script_to_db(chat_id, command, description, code, author, author_id)
-    
-    # Сохраняем все данные
-    save_data()
-    
-    await update.message.reply_text(
-        f"✅ *Скрипт обновлён!*\n\n"
-        f"📌 Команда: `{command}`\n"
-        f"📦 Новый размер: {len(code)} символов",
-        parse_mode='Markdown'
-    )
-    
-    logger.info(f"📝 Скрипт {command} обновлён в чате {chat_id}")
-    
-    return True
+        
+    return False
 
-async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выполнение кастомного скрипта с динамическим импортом библиотек"""
-    chat_id = str(update.effective_chat.id)
-    user_id = update.effective_user.id
-    message_text = update.message.text
-    
-    # Проверяем, это команда?
-    if not message_text.startswith('/'):
-        return False
-    
-    parts = message_text.split()
-    command = parts[0].lower()
-    args = parts[1:] if len(parts) > 1 else []
-    
-    # Убираем @botname если есть
-    if '@' in command:
-        command = command.split('@')[0]
-    
-    # Получаем скрипт из БД
-    script_info = get_script_from_db(chat_id, command)
-    
-    if not script_info:
-        return False
-    
-    script_code = script_info['code']
+async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    doc = update.message.document
+    uid = update.effective_user.id
+    if not doc.file_name.endswith('.txt'): return False
+    if uid not in pending_scripts and uid not in editing_scripts: return False
     
     try:
-        # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
-        # Даже если загрузка в начале не удалась, пробуем здесь снова (вдруг pip докачал)
-        global async_playwright, javascript, require, On, Once
+        f = await context.bot.get_file(doc.file_id)
+        content = (await f.download_as_bytearray()).decode('utf-8')
+        cmd, desc, code = parse_script_text(content)
+        if not code.strip(): code = content
         
-        # Попытка дозагрузки Playwright
-        if async_playwright is None:
-             if 'playwright' not in sys.modules:
-                 # Пытаемся импортировать стандартно, если force_install сработал
-                 try:
-                     import playwright.async_api
-                     async_playwright = playwright.async_api.async_playwright
-                 except ImportError:
-                     pass
+        chat_id = str(update.effective_chat.id)
+        
+        if uid in pending_scripts:
+            pending = pending_scripts.pop(uid)
+            final_cmd = cmd or pending.get('command')
+            if not final_cmd: return await update.message.reply_text("❌ Не указана команда!")
+            save_script_to_db(chat_id, final_cmd, desc, code, update.effective_user.username, uid)
+            save_data()
+            await update.message.reply_text(f"✅ Скрипт `{final_cmd}` загружен из файла!", parse_mode='Markdown')
+            return True
+        
+        if uid in editing_scripts:
+            editing = editing_scripts.pop(uid)
+            sinfo = get_script_from_db(chat_id, editing['command'])
+            save_script_to_db(chat_id, editing['command'], desc, code, sinfo['author'], sinfo['author_id'])
+            save_data()
+            await update.message.reply_text(f"✅ Скрипт `{editing['command']}` обновлен из файла!", parse_mode='Markdown')
+            return True
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Ошибка файла: {e}")
+        return True
+    
+    return False
 
-        # Попытка дозагрузки Javascript (для Mineflayer)
-        if javascript is None:
-            try:
-                import javascript as js_mod
-                javascript = js_mod
-                require = js_mod.require
-                On = js_mod.On
-                Once = js_mod.Once
-            except ImportError:
-                pass
+# --- ИСПОЛНЕНИЕ СКРИПТОВ ---
 
-        # Создаем локальное пространство имен с полным доступом
+async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    user_id = update.effective_user.id
+    text = update.message.text
+    if not text.startswith('/'): return
+    
+    parts = text.split()
+    cmd = parts[0].lower().split('@')[0]
+    args = parts[1:]
+    
+    script = get_script_from_db(chat_id, cmd)
+    if not script: return
+    
+    try:
+        # ЗАЩИТА: Проверяем наличие Node.js перед запуском скриптов Aternos
+        if ("javascript" in script['code'] or "mineflayer" in script['code']) and not HAS_NODE:
+             return await update.message.reply_text(
+                 "❌ **Ошибка выполнения:** Этот скрипт требует Node.js (Mineflayer), но на хостинге он не установлен.\n"
+                 "Обратитесь к администратору или смените хостинг.",
+                 parse_mode='Markdown'
+             )
+
         import builtins
-        local_namespace = {
+        local_ns = {
             '__builtins__': builtins,
-            'update': update,
-            'context': context,
-            'args': args,
-            'DATA_DIR': DATA_DIR,
-            'DB_PATH': DB_PATH,
-            'InlineKeyboardButton': InlineKeyboardButton, # Передаем классы кнопок
+            'update': update, 'context': context, 'args': args,
+            'DATA_DIR': DATA_DIR, 'DB_PATH': DB_PATH,
+            'InlineKeyboardButton': InlineKeyboardButton,
             'InlineKeyboardMarkup': InlineKeyboardMarkup,
-            # Передаем объекты для Aternos
+            # Пробрасываем библиотеки только если они загрузились
             'async_playwright': async_playwright,
             'javascript': javascript,
-            'require': require,
-            'On': On,
-            'Once': Once
+            'require': require, 'On': On, 'Once': Once
         }
         
-        # Добавляем telegram классы
+        # Добавляем стандартные модули
+        popular_modules = ['math', 'random', 'datetime', 're', 'json', 'os', 'sys', 'subprocess', 'requests', 'asyncio', 'aiohttp', 'time', 'sqlite3', 'playwright', 'javascript', 'hashlib', 'base64', 'pathlib', 'shutil']
+        for mod in popular_modules:
+            try: local_ns[mod] = __import__(mod)
+            except: pass
+        
+        # Telegram классы
         try:
-            from telegram import Update as TgUpdate
-            from telegram.ext import ContextTypes as TgContextTypes
-            from telegram.constants import ParseMode
-            local_namespace['Update'] = TgUpdate
-            local_namespace['ContextTypes'] = TgContextTypes
-            local_namespace['ParseMode'] = ParseMode
-        except:
-            pass
+            local_ns['Update'] = Update
+            local_ns['ContextTypes'] = ContextTypes
+            local_ns['ParseMode'] = ParseMode
+        except: pass
         
-        # Предварительно импортируем популярные модули
-        popular_modules = [
-            'math', 'random', 'datetime', 're', 'json', 'os', 'sys',
-            'subprocess', 'requests', 'asyncio', 'aiohttp', 'time',
-            'hashlib', 'base64', 'urllib', 'collections', 'itertools',
-            'functools', 'operator', 'string', 'textwrap', 'uuid',
-            'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
-            'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
-            'html', 'xml', 'email', 'mimetypes', 'socket', 'ssl',
-            'threading', 'multiprocessing', 'queue', 'concurrent',
-            # Важные для Aternos
-            'playwright', 'javascript'
-        ]
+        exec(script['code'], local_ns)
         
-        for mod_name in popular_modules:
-            try:
-                local_namespace[mod_name] = __import__(mod_name)
-            except ImportError:
-                pass  # Модуль не установлен
+        if 'execute' in local_ns:
+            res = await local_ns['execute'](update, context, args)
+            if res:
+                result_str = str(res)
+                try: await update.message.reply_text(result_str, parse_mode='Markdown')
+                except: await update.message.reply_text(result_str)
         
-        exec(script_code, local_namespace)
-        
-        if 'execute' in local_namespace:
-            result = await local_namespace['execute'](update, context, args)
-            if result:
-                result_str = str(result)
-                try:
-                    await update.message.reply_text(result_str, parse_mode='Markdown')
-                except Exception:
-                    try:
-                        await update.message.reply_text(result_str, parse_mode='MarkdownV2')
-                    except Exception:
-                        await update.message.reply_text(result_str)
-        
-        # Логируем успешное выполнение
-        log_execution(chat_id, user_id, command, True)
+        log_execution(chat_id, user_id, cmd, True)
         
     except Exception as e:
-        log_execution(chat_id, user_id, command, False, str(e))
+        log_execution(chat_id, user_id, cmd, False, str(e))
         error_msg = str(e)
-        if len(error_msg) > 500:
-            error_msg = error_msg[:500] + "..."
-        try:
-            await update.message.reply_text(f"❌ Ошибка выполнения скрипта:\n`{error_msg}`", parse_mode='Markdown')
-        except:
-            await update.message.reply_text(f"❌ Ошибка выполнения скрипта:\n{error_msg}")
-    
-    return True
-
-async def list_scripts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать список скриптов чата"""
-    chat_id = str(update.effective_chat.id)
-    scripts = get_chat_scripts(chat_id)
-    
-    if not scripts:
-        await update.message.reply_text("📭 В этом чате пока нет кастомных скриптов.")
-        return
-    
-    text = "📜 *Кастомные скрипты этого чата:*\n\n"
-    for cmd, info in scripts.items():
-        text += f"• `{cmd}` - {info['description']}\n"
-        text += f"  _Автор: @{info['author']}_\n\n"
-    
-    await update.message.reply_text(text, parse_mode='Markdown')
-
-async def delete_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Удалить скрипт"""
-    chat_id = str(update.effective_chat.id)
-    
-    if not context.args:
-        await update.message.reply_text("❌ Укажите команду для удаления: `/deletescript /команда`", parse_mode='Markdown')
-        return
-    
-    command = context.args[0].lower()
-    if not command.startswith('/'):
-        command = '/' + command
-    
-    if delete_script_from_db(chat_id, command):
-        if chat_id in scripts_registry and command in scripts_registry[chat_id]:
-            del scripts_registry[chat_id][command]
-        await update.message.reply_text(f"✅ Скрипт `{command}` удалён!", parse_mode='Markdown')
-    else:
-        await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Помощь"""
-    await update.message.reply_text(
-        "📖 *Справка по боту*\n\n"
-        "*Команды управления:*\n"
-        "`/addscript` - Добавить скрипт\n"
-        "`/listscripts` - Список скриптов\n"
-        "`/viewscript /cmd` - Посмотреть код\n"
-        "`/editscript /cmd` - Редактировать\n"
-        "`/deletescript /cmd` - Удалить\n"
-        "`/cancel` - Отменить действие\n\n"
-        "*Как добавить скрипт:*\n"
-        "1. Введите `/addscript`\n"
-        "2. Отправьте `.txt` файл → сохраняется СРАЗУ!\n"
-        "3. Или текстом частями → напишите `готово`",
-        parse_mode='Markdown'
-    )
+        if len(error_msg) > 500: error_msg = error_msg[:500] + "..."
+        await update.message.reply_text(f"❌ Ошибка скрипта:\n`{error_msg}`", parse_mode='Markdown')
 
 async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запуск триггер-скриптов на каждое сообщение"""
+    """Проверка триггеров (функция check_triggers в скриптах)"""
     chat_id = str(update.effective_chat.id)
     scripts = get_chat_scripts(chat_id)
+    if not scripts: return
     
-    if not scripts:
-        return
-    
-    # Ищем скрипты с функцией check_triggers
-    for cmd in scripts.keys():
-        script_info = get_script_from_db(chat_id, cmd)
-        if not script_info:
-            continue
-        
-        script_code = script_info['code']
-        
-        # Проверяем, есть ли функция check_triggers
-        if 'async def check_triggers' not in script_code and 'def check_triggers' not in script_code:
-            continue
-        
+    for cmd in scripts:
+        s = get_script_from_db(chat_id, cmd)
+        if 'check_triggers' not in s['code']: continue
         try:
-            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ В ТРИГГЕРЫ ---
-            global async_playwright, javascript, require, On, Once
-            
             import builtins
-            local_namespace = {
-                '__builtins__': builtins,
-                'update': update,
-                'context': context,
-                'DATA_DIR': DATA_DIR,
-                'DB_PATH': DB_PATH,
+            local_ns = {
+                '__builtins__': builtins, 'update': update, 'context': context,
+                'DATA_DIR': DATA_DIR, 'DB_PATH': DB_PATH,
                 'async_playwright': async_playwright,
-                'javascript': javascript,
-                'require': require,
-                'On': On,
-                'Once': Once
+                'javascript': javascript, 'require': require, 'On': On, 'Once': Once
             }
-            
-            for mod in ['math','random','datetime','re','json','os','sys','subprocess',
-                        'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib', 'playwright', 'javascript']:
-                try: local_namespace[mod] = __import__(mod)
+            # Импортируем модули
+            for mod in ['math','random','datetime','re','json','os','sys','subprocess','requests','asyncio','aiohttp','time','sqlite3','playwright','javascript']:
+                try: local_ns[mod] = __import__(mod)
                 except: pass
-            
-            exec(script_code, local_namespace)
-            
-            if 'check_triggers' in local_namespace:
-                await local_namespace['check_triggers'](update, context)
+                
+            exec(s['code'], local_ns)
+            if 'check_triggers' in local_ns:
+                await local_ns['check_triggers'](update, context)
         except Exception as e:
             print(f"Trigger error in {cmd}: {e}")
 
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик callback-кнопок из пользовательских скриптов"""
+    """Обработчик инлайн кнопок из скриптов"""
     query = update.callback_query
     chat_id = str(update.effective_chat.id)
-    user_id = update.effective_user.id
-    callback_data = query.data
-    
+    data = query.data
     scripts = get_chat_scripts(chat_id)
-    if not scripts:
-        await query.answer("Скрипты не найдены")
-        return
-    
     handled = False
     
-    for cmd in scripts.keys():
-        script_info = get_script_from_db(chat_id, cmd)
-        if not script_info:
-            continue
-        
-        script_code = script_info['code']
-        
-        has_callback_handler = (
-            'async def handle_callback' in script_code or 
-            'def handle_callback' in script_code or
-            'async def handle_somka_callbacks' in script_code or
-            'def handle_somka_callbacks' in script_code
+    for cmd in scripts:
+        s = get_script_from_db(chat_id, cmd)
+        # Проверяем наличие любого из обработчиков
+        has_handler = (
+            'handle_callback' in s['code'] or 
+            'handle_somka_callbacks' in s['code']
         )
-        
-        if not has_callback_handler:
-            continue
+        if not has_handler: continue
         
         try:
-            # --- ВНЕДРЕНИЕ ЗАВИСИМОСТЕЙ В КНОПКИ ---
-            global async_playwright, javascript, require, On, Once
-            
             import builtins
-            local_namespace = {
-                '__builtins__': builtins,
-                'update': update,
-                'context': context,
-                'query': query,
-                'callback_data': callback_data,
-                'DATA_DIR': DATA_DIR,
-                'DB_PATH': DB_PATH,
-                'InlineKeyboardButton': InlineKeyboardButton,
-                'InlineKeyboardMarkup': InlineKeyboardMarkup,
-                'async_playwright': async_playwright,
-                'javascript': javascript,
-                'require': require,
-                'On': On,
-                'Once': Once
+            local_ns = {
+                '__builtins__': builtins, 'update': update, 'context': context, 'query': query, 'callback_data': data,
+                'InlineKeyboardButton': InlineKeyboardButton, 'InlineKeyboardMarkup': InlineKeyboardMarkup,
+                'async_playwright': async_playwright, 'javascript': javascript, 'require': require
             }
-            
-            popular_modules = ['math', 'random', 'datetime', 're', 'json', 'os', 'sys', 'asyncio', 'time', 'sqlite3', 'playwright', 'javascript']
-            for mod_name in popular_modules:
-                try: local_namespace[mod_name] = __import__(mod_name)
+            # Стандартные модули
+            for mod in ['math','random','datetime','re','json','os','sys','asyncio','time','sqlite3','playwright','javascript']:
+                try: local_ns[mod] = __import__(mod)
                 except: pass
             
-            # Telegram классы
-            try:
-                from telegram import Update as TgUpdate
-                from telegram.ext import ContextTypes as TgContextTypes
-                local_namespace['Update'] = TgUpdate
-                local_namespace['ContextTypes'] = TgContextTypes
-            except: pass
+            exec(s['code'], local_ns)
             
-            exec(script_code, local_namespace)
-            
-            handler_names = ['handle_callback', 'handle_somka_callbacks']
-            for handler_name in handler_names:
-                if handler_name in local_namespace:
+            # Пробуем разные имена функций
+            for handler_name in ['handle_callback', 'handle_somka_callbacks']:
+                if handler_name in local_ns:
                     try:
-                        result = await local_namespace[handler_name](update, context, callback_data)
-                        if result:
-                            handled = True
-                            break
+                        res = await local_ns[handler_name](update, context, data)
+                        if res: handled = True
                     except TypeError:
-                        try:
-                            result = await local_namespace[handler_name](update, context)
-                            if result:
-                                handled = True
-                                break
-                        except: pass
-            if handled: return
-                
+                        # Если функция не принимает callback_data
+                        res = await local_ns[handler_name](update, context)
+                        if res: handled = True
+                    if handled: break
+            
+            if handled: break
         except Exception as e:
-            logger.error(f"Callback error in {cmd}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Callback error {cmd}: {e}")
     
     if not handled:
         try: await query.answer()
         except: pass
 
-async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженных txt файлов"""
-    user_id = update.effective_user.id
+async def list_scripts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
-    document = update.message.document
+    scripts = get_chat_scripts(chat_id)
+    if not scripts: return await update.message.reply_text("📭 В этом чате пока нет кастомных скриптов.")
     
-    if not document.file_name.endswith('.txt'):
-        return False
+    text = "📜 *Кастомные скрипты:*\n\n"
+    for cmd, info in scripts.items():
+        text += f"• `{cmd}` - {info['description']}\n"
     
-    if user_id not in pending_scripts and user_id not in editing_scripts:
-        return False
+    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def delete_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args: return await update.message.reply_text("❌ Укажите команду: `/deletescript /команда`", parse_mode='Markdown')
+    cmd = context.args[0].lower()
+    if not cmd.startswith('/'): cmd = '/' + cmd
     
-    try:
-        file = await context.bot.get_file(document.file_id)
-        file_bytes = await file.download_as_bytearray()
-        file_content = file_bytes.decode('utf-8')
-        
-        command, description, code = parse_script_text(file_content)
-        if not code.strip(): code = file_content
-        
-        if user_id in pending_scripts:
-            pending = pending_scripts.pop(user_id)
-            final_command = command or pending.get('command')
-            final_description = description if description != "Без описания" else pending.get('description', 'Без описания')
-            
-            if not final_command:
-                await update.message.reply_text("❌ Не указана команда в файле!")
-                return True
-            
-            author = update.effective_user.username or str(user_id)
-            save_script_to_db(chat_id, final_command, final_description, code, author, user_id)
-            save_user(user_id, update.effective_user.username, update.effective_user.first_name)
-            save_data()
-            await update.message.reply_text(f"✅ Скрипт {final_command} сохранён!")
-            return True
-        
-        elif user_id in editing_scripts:
-            editing = editing_scripts.pop(user_id)
-            edit_command = editing['command']
-            
-            script_info = get_script_from_db(chat_id, edit_command)
-            final_description = description if description != "Без описания" else script_info['description']
-            author = script_info['author']
-            author_id = script_info.get('author_id')
-            
-            save_script_to_db(chat_id, edit_command, final_description, code, author, author_id)
-            save_data()
-            await update.message.reply_text(f"✅ Скрипт {edit_command} обновлён!")
-            return True
-            
-    except Exception as e:
-        await update.message.reply_text(f"❌ Ошибка чтения файла: {str(e)}")
-        return True
-    
-    return False
+    if delete_script_from_db(str(update.effective_chat.id), cmd):
+        if str(update.effective_chat.id) in scripts_registry and cmd in scripts_registry[str(update.effective_chat.id)]:
+            del scripts_registry[str(update.effective_chat.id)][cmd]
+        await update.message.reply_text(f"✅ Скрипт `{cmd}` удалён!", parse_mode='Markdown')
+    else:
+        await update.message.reply_text(f"❌ Скрипт `{cmd}` не найден!", parse_mode='Markdown')
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ℹ️ Используй `/addscript` для добавления кода.", parse_mode='Markdown')
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if await handle_script_upload(update, context):
-        return
+    if await handle_script_upload(update, context): return
     await run_triggers(update, context)
     if update.message.text and update.message.text.startswith('/'):
         await execute_custom_script(update, context)
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.document:
-        if await handle_document_upload(update, context):
-            return
+    if await handle_document_upload(update, context): return
     await run_triggers(update, context)
 
 def main():
@@ -1188,7 +735,6 @@ def main():
     application.add_handler(MessageHandler(filters.Document.TEXT, document_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     application.add_handler(MessageHandler(filters.COMMAND, execute_custom_script))
-    
     application.add_handler(CallbackQueryHandler(handle_callback_query))
     
     logger.info("🤖 Бот запущен!")
