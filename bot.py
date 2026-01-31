@@ -16,7 +16,7 @@ def install_dependencies():
         # 1. Установка браузеров Playwright
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
         # 2. Установка системных зависимостей (может требовать sudo, но пробуем)
-        # subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=False) 
+        subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=False) 
         
         # 3. Установка Mineflayer (Node.js)
         if not os.path.exists("node_modules"):
