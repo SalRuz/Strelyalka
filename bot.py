@@ -4,11 +4,46 @@ import json
 import sqlite3
 import asyncio
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
-from playwright.async_api import async_playwright
+
+# --- АВТО-УСТАНОВКА ЗАВИСИМОСТЕЙ (ДЛЯ ХОСТИНГА БЕЗ ТЕРМИНАЛА) ---
+def install_dependencies():
+    print("🔄 [SYSTEM] Проверка и установка зависимостей Playwright и Node.js...")
+    try:
+        # 1. Установка браузеров Playwright
+        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        # 2. Установка системных зависимостей (может требовать sudo, но пробуем)
+        # subprocess.run([sys.executable, "-m", "playwright", "install-deps"], check=False) 
+        
+        # 3. Установка Mineflayer (Node.js)
+        if not os.path.exists("node_modules"):
+            print("🔄 [SYSTEM] Установка Mineflayer (npm)...")
+            subprocess.run(["npm", "install", "mineflayer"], shell=True, check=False)
+        
+        print("✅ [SYSTEM] Зависимости установлены.")
+    except Exception as e:
+        print(f"⚠️ [SYSTEM] Ошибка установки зависимостей (если бот работает, игнорируйте): {e}")
+
+# Запускаем установку ПЕРЕД импортом библиотек
+install_dependencies()
+
+# --- ИМПОРТЫ ПОСЛЕ УСТАНОВКИ ---
+try:
+    from playwright.async_api import async_playwright
+    import javascript
+    from javascript import require, On, Once
+except ImportError as e:
+    print(f"❌ Критическая ошибка: Не удалось импортировать модули даже после установки: {e}")
+    # Пытаемся продолжить, но скрипты Aternos могут падать
+    async_playwright = None
+    javascript = None
+    require = None
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
 # Настройка логирования
 logging.basicConfig(
@@ -485,7 +520,7 @@ async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📝 Текущее описание: {script_info['description']}\n\n"
         f"Отправьте *новый код полностью* (можно частями).\n"
         f"Формат такой же как при добавлении.\n\n"
-        f"⚠️ `/cancel` - отменить редактирование",
+        f"⚠️ `/cancel` - отменить",
         parse_mode='Markdown'
     )
     
@@ -725,6 +760,12 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'DB_PATH': DB_PATH,    # Доступ к пути БД
             'InlineKeyboardButton': InlineKeyboardButton,  # Для inline-кнопок
             'InlineKeyboardMarkup': InlineKeyboardMarkup,  # Для разметки кнопок
+            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+            'javascript': javascript,
+            'require': require,
+            'On': On,
+            'Once': Once,
+            'async_playwright': async_playwright
         }
         
         # Добавляем telegram классы
@@ -747,7 +788,9 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
             'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
             'html', 'xml', 'email', 'mimetypes', 'socket', 'ssl',
-            'threading', 'multiprocessing', 'queue', 'concurrent', 'playwright'
+            'threading', 'multiprocessing', 'queue', 'concurrent',
+            # --- ДОБАВЛЕНЫ ДЛЯ БЕЗОПАСНОСТИ ---
+            'playwright', 'javascript'
         ]
         
         for mod_name in popular_modules:
@@ -889,11 +932,17 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'context': context,
                 'DATA_DIR': DATA_DIR,
                 'DB_PATH': DB_PATH,
+                # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+                'javascript': javascript,
+                'require': require,
+                'On': On,
+                'Once': Once,
+                'async_playwright': async_playwright
             }
             
             # Импортируем модули
             for mod in ['math','random','datetime','re','json','os','sys','subprocess',
-                        'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib','playwright']:
+                        'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib', 'playwright', 'javascript']:
                 try: local_namespace[mod] = __import__(mod)
                 except: pass
             
@@ -951,6 +1000,12 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 'DB_PATH': DB_PATH,
                 'InlineKeyboardButton': InlineKeyboardButton,
                 'InlineKeyboardMarkup': InlineKeyboardMarkup,
+                # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+                'javascript': javascript,
+                'require': require,
+                'On': On,
+                'Once': Once,
+                'async_playwright': async_playwright
             }
             
             # Импортируем ВСЕ популярные модули
@@ -960,7 +1015,8 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 'hashlib', 'base64', 'urllib', 'collections', 'itertools',
                 'functools', 'operator', 'string', 'textwrap', 'uuid',
                 'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
-                'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs', 'playwright'
+                'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
+                'playwright', 'javascript'
             ]
             
             for mod_name in popular_modules:
