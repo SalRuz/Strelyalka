@@ -8,21 +8,10 @@ import subprocess
 import sys
 import importlib
 import site
-import shutil
 from datetime import datetime
 from pathlib import Path
 
 # ==================== БЛОК БЕЗОПАСНОЙ ЗАГРУЗКИ (SYSTEM BOOT) ====================
-
-def check_node_installed():
-    """Проверяет наличие Node.js. Если его нет, Mineflayer будет отключен."""
-    node_path = shutil.which("node") or shutil.which("nodejs")
-    if node_path:
-        print(f"✅ [SYSTEM] Node.js найден: {node_path}")
-        return True
-    else:
-        print("⚠️ [SYSTEM] Node.js НЕ НАЙДЕН. Скрипты с Mineflayer/Javascript работать не будут.")
-        return False
 
 def force_install(package_name, import_name=None):
     """Устанавливает пакет через pip внутри скрипта"""
@@ -34,11 +23,6 @@ def force_install(package_name, import_name=None):
         return True
     except ImportError:
         pass 
-
-    # Если это javascript либа, но нет Node.js - пропускаем установку, чтобы не крашить pip
-    if package_name == "javascript" and not HAS_NODE:
-        print("⛔ [SYSTEM] Пропуск установки 'javascript' (нет Node.js на хостинге)")
-        return False
 
     print(f"🔄 [SYSTEM] Устанавливаю {package_name}...")
     try:
@@ -57,49 +41,33 @@ def force_install(package_name, import_name=None):
         return False
 
 def install_browsers():
-    """Установка браузеров Playwright"""
+    """Установка браузеров Playwright (Chromium)"""
     if not HAS_PLAYWRIGHT: return
     print("🔄 [SYSTEM] Проверка браузеров Chromium...")
     try:
+        # Пытаемся установить браузер. Если не выйдет - бот запустится, но скрипты с браузером упадут.
         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
     except Exception as e:
-        print(f"⚠️ [SYSTEM] Ошибка установки браузера: {e}")
+        print(f"⚠️ [SYSTEM] Ошибка установки браузера (игнорируем): {e}")
 
 # --- ЗАПУСК ПРОВЕРОК ---
 print("🚀 [BOOT] Инициализация системы...")
 
-# 1. Проверяем наличие Node.js
-HAS_NODE = check_node_installed()
-
-# 2. Устанавливаем Python библиотеки
+# 1. Устанавливаем Python библиотеки
 force_install("aiosqlite")
 HAS_PLAYWRIGHT = force_install("playwright", "playwright.async_api")
-HAS_JS_LIB = force_install("javascript")
 
-# 3. Докачиваем браузеры (если Playwright встал)
+# 2. Докачиваем браузеры (если Playwright встал)
 if HAS_PLAYWRIGHT:
     install_browsers()
 
-# 4. Импортируем библиотеки (безопасно, чтобы не упасть)
+# 3. Импортируем Playwright безопасно
 async_playwright = None
-javascript = None
-require = None
-On = None
-Once = None
-
 try:
     if HAS_PLAYWRIGHT:
         from playwright.async_api import async_playwright
 except ImportError:
     pass
-
-try:
-    if HAS_JS_LIB and HAS_NODE:
-        import javascript
-        from javascript import require, On, Once
-except Exception as e:
-    print(f"⚠️ [BOOT] Мост JS не загружен (возможно, старая версия Node): {e}")
-    HAS_NODE = False # Отключаем JS фичи при ошибке импорта
 
 print("✅ [BOOT] Среда готова. Запуск Telegram бота...")
 
@@ -341,7 +309,6 @@ editing_scripts = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Приветственное сообщение"""
-    status_text = "✅" if HAS_NODE else "❌ (Скрипты Aternos работать не будут, нужен Node.js)"
     await update.message.reply_text(
         f"🤖 *Привет! Я бот с кастомными скриптами!*\n\n"
         f"📌 *Доступные команды:*\n"
@@ -352,7 +319,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"`/deletescript <команда>` - Удалить скрипт\n"
         f"`/cancel` - Отменить текущее действие\n"
         f"`/help` - Помощь\n\n"
-        f"⚙️ Статус Node.js: {status_text}\n"
         f"💡 Вы можете создавать свои команды!",
         parse_mode='Markdown'
     )
@@ -554,14 +520,6 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
     if not script: return
     
     try:
-        # ЗАЩИТА: Проверяем наличие Node.js перед запуском скриптов Aternos
-        if ("javascript" in script['code'] or "mineflayer" in script['code']) and not HAS_NODE:
-             return await update.message.reply_text(
-                 "❌ **Ошибка выполнения:** Этот скрипт требует Node.js (Mineflayer), но на хостинге он не установлен.\n"
-                 "Обратитесь к администратору или смените хостинг.",
-                 parse_mode='Markdown'
-             )
-
         import builtins
         local_ns = {
             '__builtins__': builtins,
@@ -569,14 +527,12 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'DATA_DIR': DATA_DIR, 'DB_PATH': DB_PATH,
             'InlineKeyboardButton': InlineKeyboardButton,
             'InlineKeyboardMarkup': InlineKeyboardMarkup,
-            # Пробрасываем библиотеки только если они загрузились
-            'async_playwright': async_playwright,
-            'javascript': javascript,
-            'require': require, 'On': On, 'Once': Once
+            # Пробрасываем библиотеки
+            'async_playwright': async_playwright
         }
         
         # Добавляем стандартные модули
-        popular_modules = ['math', 'random', 'datetime', 're', 'json', 'os', 'sys', 'subprocess', 'requests', 'asyncio', 'aiohttp', 'time', 'sqlite3', 'playwright', 'javascript', 'hashlib', 'base64', 'pathlib', 'shutil']
+        popular_modules = ['math', 'random', 'datetime', 're', 'json', 'os', 'sys', 'subprocess', 'requests', 'asyncio', 'aiohttp', 'time', 'sqlite3', 'playwright', 'hashlib', 'base64', 'pathlib', 'shutil']
         for mod in popular_modules:
             try: local_ns[mod] = __import__(mod)
             except: pass
@@ -619,11 +575,10 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             local_ns = {
                 '__builtins__': builtins, 'update': update, 'context': context,
                 'DATA_DIR': DATA_DIR, 'DB_PATH': DB_PATH,
-                'async_playwright': async_playwright,
-                'javascript': javascript, 'require': require, 'On': On, 'Once': Once
+                'async_playwright': async_playwright
             }
             # Импортируем модули
-            for mod in ['math','random','datetime','re','json','os','sys','subprocess','requests','asyncio','aiohttp','time','sqlite3','playwright','javascript']:
+            for mod in ['math','random','datetime','re','json','os','sys','subprocess','requests','asyncio','aiohttp','time','sqlite3','playwright']:
                 try: local_ns[mod] = __import__(mod)
                 except: pass
                 
@@ -655,10 +610,10 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             local_ns = {
                 '__builtins__': builtins, 'update': update, 'context': context, 'query': query, 'callback_data': data,
                 'InlineKeyboardButton': InlineKeyboardButton, 'InlineKeyboardMarkup': InlineKeyboardMarkup,
-                'async_playwright': async_playwright, 'javascript': javascript, 'require': require
+                'async_playwright': async_playwright
             }
             # Стандартные модули
-            for mod in ['math','random','datetime','re','json','os','sys','asyncio','time','sqlite3','playwright','javascript']:
+            for mod in ['math','random','datetime','re','json','os','sys','asyncio','time','sqlite3','playwright']:
                 try: local_ns[mod] = __import__(mod)
                 except: pass
             
