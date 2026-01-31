@@ -11,8 +11,8 @@ import site
 from datetime import datetime
 from pathlib import Path
 
-# ==================== БЛОК АВТО-УСТАНОВКИ ЗАВИСИМОСТЕЙ ====================
-# Этот код выполняется ДО запуска бота, чтобы скачать недостающие модули на хостинге
+# ==================== БЛОК АВТО-УСТАНОВКИ (SYSTEM BOOT) ====================
+# Этот блок выполняется ПЕРЕД загрузкой телеграма, чтобы подготовить среду
 
 def force_install(package_name, import_name=None):
     """
@@ -49,18 +49,17 @@ def force_install(package_name, import_name=None):
 
 def install_playwright_browsers():
     """Отдельная установка браузеров для Playwright"""
-    # Сначала убедимся, что пакет стоит
     if force_install("playwright"):
         print("🔄 [SYSTEM] Проверка наличия браузеров Playwright...")
         try:
             # Команда установки браузера Chromium
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False)
-            print("✅ [SYSTEM] Браузер Chromium готов к работе.")
+            print("✅ [SYSTEM] Браузер Chromium готов.")
         except Exception as e:
-            print(f"⚠️ [SYSTEM] Не удалось запустить установку браузеров (возможно, уже установлены): {e}")
+            print(f"⚠️ [SYSTEM] Не удалось запустить установку браузеров: {e}")
 
 def install_node_deps():
-    """Установка Mineflayer (Node.js) для прыгающего бота"""
+    """Установка Mineflayer (Node.js)"""
     if not os.path.exists("node_modules"):
         print("🔄 [SYSTEM] Установка Mineflayer (npm)...")
         try:
@@ -69,18 +68,17 @@ def install_node_deps():
         except Exception as e:
             print(f"⚠️ [SYSTEM] Ошибка npm (убедитесь, что Node.js установлен на хостинге): {e}")
 
-# --- ЗАПУСК УСТАНОВКИ ПРИ СТАРТЕ ---
-print("🚀 [BOOT] Проверка окружения...")
+# --- ЗАПУСК УСТАНОВКИ ---
+print("🚀 [BOOT] Подготовка библиотек...")
 force_install("playwright")
 force_install("javascript")
 force_install("aiosqlite")
 
-# Устанавливаем бинарники браузеров и JS модули
+# Устанавливаем тяжелые зависимости
 install_playwright_browsers()
 install_node_deps()
 
-# --- БЕЗОПАСНЫЙ ИМПОРТ ---
-# Мы не крашим бота, если импорт не прошел сразу. Мы попробуем импортировать внутри функций скриптов.
+# --- ПРЕДВАРИТЕЛЬНАЯ ЗАГРУЗКА ---
 try:
     from playwright.async_api import async_playwright
 except ImportError:
@@ -95,10 +93,11 @@ except ImportError:
     On = None
     Once = None
 
-print("✅ [BOOT] Загрузка основного бота...")
+print("✅ [BOOT] Библиотеки загружены. Запуск Telegram бота...")
 
 # ==================== ОСНОВНОЙ КОД БОТА ====================
 
+# ВОТ ТУТ ВСЕ ВАЖНЫЕ ИМПОРТЫ, КОТОРЫЕ Я РАНЬШЕ СЛУЧАЙНО УДАЛИЛ
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 
@@ -457,8 +456,8 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Если в скрипте есть подкоманды, то использовать их строго после основной команды, пример: /kod start, /kod stop.\n\n"
         "Если в скрипте есть отчет времени, то использовать для него строго отдельную def функцию."
         "```\n\n"
-        "📌 Можно отправлять код частями.\n"
-        "⚠️ `/cancel` - отменить.",
+        "📌 Можно отправлять код частями!\n"
+        "⚠️ `/cancel` - отменить",
         parse_mode='Markdown'
     )
 
@@ -778,7 +777,7 @@ async def finalize_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, user
     return True
 
 async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Выполнение кастомного скрипта с динамической подгрузкой модулей"""
+    """Выполнение кастомного скрипта с динамическим импортом библиотек"""
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
     message_text = update.message.text
@@ -804,45 +803,43 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
     script_code = script_info['code']
     
     try:
-        # --- БЛОК ОБЕСПЕЧЕНИЯ ЗАВИСИМОСТЕЙ ---
-        # Если при старте модули не загрузились, пробуем получить их сейчас
+        # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+        # Даже если загрузка в начале не удалась, пробуем здесь снова (вдруг pip докачал)
         global async_playwright, javascript, require, On, Once
         
         # Попытка дозагрузки Playwright
         if async_playwright is None:
              if 'playwright' not in sys.modules:
-                 force_install('playwright')
-             try:
-                 import playwright.async_api
-                 async_playwright = playwright.async_api.async_playwright
-             except:
-                 pass
+                 # Пытаемся импортировать стандартно, если force_install сработал
+                 try:
+                     import playwright.async_api
+                     async_playwright = playwright.async_api.async_playwright
+                 except ImportError:
+                     pass
 
         # Попытка дозагрузки Javascript (для Mineflayer)
         if javascript is None:
-            if 'javascript' not in sys.modules:
-                force_install('javascript')
             try:
                 import javascript as js_mod
                 javascript = js_mod
                 require = js_mod.require
                 On = js_mod.On
                 Once = js_mod.Once
-            except:
+            except ImportError:
                 pass
 
         # Создаем локальное пространство имен с полным доступом
         import builtins
         local_namespace = {
-            '__builtins__': builtins,  # Полный доступ ко всем встроенным функциям
+            '__builtins__': builtins,
             'update': update,
             'context': context,
             'args': args,
-            'DATA_DIR': DATA_DIR,  # Доступ к папке данных
-            'DB_PATH': DB_PATH,    # Доступ к пути БД
-            'InlineKeyboardButton': InlineKeyboardButton,  # Для inline-кнопок
-            'InlineKeyboardMarkup': InlineKeyboardMarkup,  # Для разметки кнопок
-            # Передаем объекты Aternos
+            'DATA_DIR': DATA_DIR,
+            'DB_PATH': DB_PATH,
+            'InlineKeyboardButton': InlineKeyboardButton, # Передаем классы кнопок
+            'InlineKeyboardMarkup': InlineKeyboardMarkup,
+            # Передаем объекты для Aternos
             'async_playwright': async_playwright,
             'javascript': javascript,
             'require': require,
@@ -887,22 +884,18 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             result = await local_namespace['execute'](update, context, args)
             if result:
                 result_str = str(result)
-                # Пробуем отправить с Markdown, если ошибка - без форматирования
                 try:
                     await update.message.reply_text(result_str, parse_mode='Markdown')
                 except Exception:
-                    # Пробуем MarkdownV2
                     try:
                         await update.message.reply_text(result_str, parse_mode='MarkdownV2')
                     except Exception:
-                        # Если форматирование не работает, отправляем как есть
                         await update.message.reply_text(result_str)
         
         # Логируем успешное выполнение
         log_execution(chat_id, user_id, command, True)
         
     except Exception as e:
-        # Логируем ошибку
         log_execution(chat_id, user_id, command, False, str(e))
         error_msg = str(e)
         if len(error_msg) > 500:
@@ -917,8 +910,6 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
 async def list_scripts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать список скриптов чата"""
     chat_id = str(update.effective_chat.id)
-    
-    # Получаем скрипты из БД
     scripts = get_chat_scripts(chat_id)
     
     if not scripts:
@@ -944,12 +935,9 @@ async def delete_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not command.startswith('/'):
         command = '/' + command
     
-    # Удаляем из БД
     if delete_script_from_db(chat_id, command):
-        # Удаляем из кэша
         if chat_id in scripts_registry and command in scripts_registry[chat_id]:
             del scripts_registry[chat_id][command]
-        
         await update.message.reply_text(f"✅ Скрипт `{command}` удалён!", parse_mode='Markdown')
     else:
         await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
@@ -968,27 +956,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Как добавить скрипт:*\n"
         "1. Введите `/addscript`\n"
         "2. Отправьте `.txt` файл → сохраняется СРАЗУ!\n"
-        "3. Или текстом частями → напишите `готово`\n\n"
-        "*Формат скрипта:*\n"
-        "```\n"
-        "###COMMAND: mycommand\n"
-        "###DESCRIPTION: Описание\n"
-        "###CODE:\n"
-        "async def execute(update, context, args):\n"
-        "    return 'Привет!'\n"
-        "```\n\n"
-        "*Для inline-кнопок:*\n"
-        "Добавьте `async def handle_callback(update, context, callback_data)`\n\n"
-        "📎 txt файлы сохраняются сразу!\n"
-        "🔓 Все модули Python разрешены!",
+        "3. Или текстом частями → напишите `готово`",
         parse_mode='Markdown'
     )
 
 async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Запуск триггер-скриптов на каждое сообщение"""
     chat_id = str(update.effective_chat.id)
-    
-    # Получаем скрипты чата из БД
     scripts = get_chat_scripts(chat_id)
     
     if not scripts:
@@ -1007,8 +981,7 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
         
         try:
-            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
-            # Здесь так же нужно пробросить зависимости, чтобы триггеры могли их использовать
+            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ В ТРИГГЕРЫ ---
             global async_playwright, javascript, require, On, Once
             
             import builtins
@@ -1025,7 +998,6 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'Once': Once
             }
             
-            # Импортируем модули
             for mod in ['math','random','datetime','re','json','os','sys','subprocess',
                         'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib', 'playwright', 'javascript']:
                 try: local_namespace[mod] = __import__(mod)
@@ -1045,16 +1017,13 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
     user_id = update.effective_user.id
     callback_data = query.data
     
-    # Получаем все скрипты чата
     scripts = get_chat_scripts(chat_id)
-    
     if not scripts:
         await query.answer("Скрипты не найдены")
         return
     
     handled = False
     
-    # Ищем скрипты с функцией handle_callback или специфичными обработчиками
     for cmd in scripts.keys():
         script_info = get_script_from_db(chat_id, cmd)
         if not script_info:
@@ -1062,7 +1031,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         
         script_code = script_info['code']
         
-        # Проверяем, есть ли функция handle_callback или handle_somka_callbacks или подобные
         has_callback_handler = (
             'async def handle_callback' in script_code or 
             'def handle_callback' in script_code or
@@ -1074,7 +1042,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
             continue
         
         try:
-            # --- ВНЕДРЕНИЕ ATERNOS ЗАВИСИМОСТЕЙ ---
+            # --- ВНЕДРЕНИЕ ЗАВИСИМОСТЕЙ В КНОПКИ ---
             global async_playwright, javascript, require, On, Once
             
             import builtins
@@ -1095,166 +1063,95 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 'Once': Once
             }
             
-            # Импортируем ВСЕ популярные модули
-            popular_modules = [
-                'math', 'random', 'datetime', 're', 'json', 'os', 'sys',
-                'subprocess', 'requests', 'asyncio', 'aiohttp', 'time',
-                'hashlib', 'base64', 'urllib', 'collections', 'itertools',
-                'functools', 'operator', 'string', 'textwrap', 'uuid',
-                'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
-                'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
-                'playwright', 'javascript'
-            ]
-            
+            popular_modules = ['math', 'random', 'datetime', 're', 'json', 'os', 'sys', 'asyncio', 'time', 'sqlite3', 'playwright', 'javascript']
             for mod_name in popular_modules:
-                try:
-                    local_namespace[mod_name] = __import__(mod_name)
-                except ImportError:
-                    pass
+                try: local_namespace[mod_name] = __import__(mod_name)
+                except: pass
             
-            # Добавляем telegram классы
+            # Telegram классы
             try:
                 from telegram import Update as TgUpdate
                 from telegram.ext import ContextTypes as TgContextTypes
-                from telegram.constants import ParseMode
                 local_namespace['Update'] = TgUpdate
                 local_namespace['ContextTypes'] = TgContextTypes
-                local_namespace['ParseMode'] = ParseMode
-            except:
-                pass
+            except: pass
             
             exec(script_code, local_namespace)
             
-            # Пробуем разные варианты названий обработчиков
             handler_names = ['handle_callback', 'handle_somka_callbacks']
-            
             for handler_name in handler_names:
                 if handler_name in local_namespace:
                     try:
-                        # Вызываем обработчик
                         result = await local_namespace[handler_name](update, context, callback_data)
                         if result:
                             handled = True
                             break
                     except TypeError:
-                        # Некоторые обработчики могут принимать только (update, context)
                         try:
                             result = await local_namespace[handler_name](update, context)
                             if result:
                                 handled = True
                                 break
-                        except:
-                            pass
-            
-            if handled:
-                return
+                        except: pass
+            if handled: return
                 
         except Exception as e:
             logger.error(f"Callback error in {cmd}: {e}")
             import traceback
             traceback.print_exc()
     
-    # Если никто не обработал - просто отвечаем
     if not handled:
-        try:
-            await query.answer()
-        except:
-            pass
+        try: await query.answer()
+        except: pass
 
 async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработка загруженных txt файлов - СРАЗУ сохраняет скрипт"""
+    """Обработка загруженных txt файлов"""
     user_id = update.effective_user.id
     chat_id = str(update.effective_chat.id)
     document = update.message.document
     
-    # Проверяем, что это txt файл
     if not document.file_name.endswith('.txt'):
         return False
     
-    # Проверяем, ожидаем ли загрузку скрипта
     if user_id not in pending_scripts and user_id not in editing_scripts:
         return False
     
     try:
-        # Скачиваем файл
         file = await context.bot.get_file(document.file_id)
         file_bytes = await file.download_as_bytearray()
         file_content = file_bytes.decode('utf-8')
         
-        # Парсим скрипт
         command, description, code = parse_script_text(file_content)
+        if not code.strip(): code = file_content
         
-        # Если код не найден через ###CODE:, используем весь файл
-        if not code.strip():
-            code = file_content
-        
-        # Режим добавления нового скрипта
         if user_id in pending_scripts:
             pending = pending_scripts.pop(user_id)
-            
-            # Используем команду из файла или из pending
             final_command = command or pending.get('command')
             final_description = description if description != "Без описания" else pending.get('description', 'Без описания')
             
             if not final_command:
-                await update.message.reply_text(
-                    "❌ Не указана команда в файле!\n\n"
-                    "Добавьте в начало файла:\n"
-                    "`###COMMAND: имя_команды`",
-                    parse_mode='Markdown'
-                )
-                return True
-            
-            if 'async def execute' not in code and 'def execute' not in code:
-                await update.message.reply_text("❌ Не найдена функция execute! Скрипт не сохранён.")
+                await update.message.reply_text("❌ Не указана команда в файле!")
                 return True
             
             author = update.effective_user.username or str(user_id)
-            
-            # Сохраняем скрипт СРАЗУ
             save_script_to_db(chat_id, final_command, final_description, code, author, user_id)
             save_user(user_id, update.effective_user.username, update.effective_user.first_name)
             save_data()
-            
-            await update.message.reply_text(
-                f"✅ *Скрипт из файла сохранён!*\n\n"
-                f"📌 Команда: `{final_command}`\n"
-                f"📝 Описание: {final_description}\n"
-                f"📦 Размер: {len(code)} символов\n\n"
-                f"Используйте `{final_command}` в этом чате!",
-                parse_mode='Markdown'
-            )
-            
-            logger.info(f"💾 Скрипт {final_command} загружен из файла пользователем {author}")
+            await update.message.reply_text(f"✅ Скрипт {final_command} сохранён!")
             return True
         
-        # Режим редактирования
         elif user_id in editing_scripts:
             editing = editing_scripts.pop(user_id)
             edit_command = editing['command']
             
-            if 'async def execute' not in code and 'def execute' not in code:
-                await update.message.reply_text("❌ Не найдена функция execute! Редактирование отменено.")
-                return True
-            
-            # Получаем текущую информацию
             script_info = get_script_from_db(chat_id, edit_command)
             final_description = description if description != "Без описания" else script_info['description']
             author = script_info['author']
             author_id = script_info.get('author_id')
             
-            # Сохраняем СРАЗУ
             save_script_to_db(chat_id, edit_command, final_description, code, author, author_id)
             save_data()
-            
-            await update.message.reply_text(
-                f"✅ *Скрипт обновлён из файла!*\n\n"
-                f"📌 Команда: `{edit_command}`\n"
-                f"📦 Новый размер: {len(code)} символов",
-                parse_mode='Markdown'
-            )
-            
-            logger.info(f"📝 Скрипт {edit_command} обновлён из файла в чате {chat_id}")
+            await update.message.reply_text(f"✅ Скрипт {edit_command} обновлён!")
             return True
             
     except Exception as e:
@@ -1264,32 +1161,21 @@ async def handle_document_upload(update: Update, context: ContextTypes.DEFAULT_T
     return False
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Общий обработчик сообщений"""
-    # Сначала проверяем, ожидаем ли скрипт
     if await handle_script_upload(update, context):
         return
-    
-    # Запускаем проверку триггеров на каждое сообщение
     await run_triggers(update, context)
-    
-    # Затем проверяем кастомные команды
     if update.message.text and update.message.text.startswith('/'):
         await execute_custom_script(update, context)
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик документов (txt файлов)"""
     if update.message.document:
         if await handle_document_upload(update, context):
             return
-    
-    # Запускаем проверку триггеров
     await run_triggers(update, context)
 
 def main():
-    """Запуск бота"""
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Системные команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("addscript", add_script))
     application.add_handler(CommandHandler("listscripts", list_scripts))
@@ -1299,14 +1185,10 @@ def main():
     application.add_handler(CommandHandler("cancel", cancel_action))
     application.add_handler(CommandHandler("help", help_command))
     
-    # Обработчик документов (txt файлы)
     application.add_handler(MessageHandler(filters.Document.TEXT, document_handler))
-    
-    # Обработчик всех сообщений (для скриптов и кастомных команд)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
     application.add_handler(MessageHandler(filters.COMMAND, execute_custom_script))
     
-    # Обработчик callback-кнопок (inline buttons)
     application.add_handler(CallbackQueryHandler(handle_callback_query))
     
     logger.info("🤖 Бот запущен!")
