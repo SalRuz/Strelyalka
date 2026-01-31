@@ -747,7 +747,7 @@ async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TY
             'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
             'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
             'html', 'xml', 'email', 'mimetypes', 'socket', 'ssl',
-            'threading', 'multiprocessing', 'queue', 'concurrent',
+            'threading', 'multiprocessing', 'queue', 'concurrent', 'playwright'
         ]
         
         for mod_name in popular_modules:
