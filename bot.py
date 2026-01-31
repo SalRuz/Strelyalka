@@ -893,7 +893,7 @@ async def run_triggers(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             # Импортируем модули
             for mod in ['math','random','datetime','re','json','os','sys','subprocess',
-                        'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib']:
+                        'requests','asyncio','aiohttp','time','sqlite3','hashlib','base64','pathlib','playwright']:
                 try: local_namespace[mod] = __import__(mod)
                 except: pass
             
@@ -960,7 +960,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
                 'hashlib', 'base64', 'urllib', 'collections', 'itertools',
                 'functools', 'operator', 'string', 'textwrap', 'uuid',
                 'pathlib', 'shutil', 'glob', 'fnmatch', 'tempfile',
-                'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs',
+                'pickle', 'sqlite3', 'csv', 'io', 'struct', 'codecs', 'playwright'
             ]
             
             for mod_name in popular_modules:
