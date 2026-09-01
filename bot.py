@@ -85,7 +85,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-BOT_TOKEN = "8271478255:AAF5FoF5cujDdbQjuZJesIjyghwgobUgixQ"
+BOT_TOKEN = ""
 
 # Путь к папке data
 DATA_DIR = Path("data")
