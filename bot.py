@@ -78,7 +78,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-BOT_TOKEN = "8271478255:AAG0PDYzM1YLGTjokJqSMaJhjRiiPdm7df4"
+BOT_TOKEN = "8409277791:AAFp6eEWnXQ3Q8tC24SJDvd9_lyPY8Q61ZM"
 DEVELOPER_ID = 1170970828  # ID разработчика (команды управления ключами)
 
 DATA_DIR = Path("data")
@@ -351,6 +351,13 @@ AI_SCRIPT_SYSTEM = (
     "    conn.commit(); conn.close()\n"
     "```\n"
     "При обработке коллбэков всегда начинай с `game = get_state(chat_id)` и после изменений делай `save_state(chat_id, game)`.\n"
+    "КОНТРАКТ ПЛАТФОРМЫ (обязательно):\n"
+    "- execute(): может вернуть СТРОКУ — она отправится пользователю. Если нужны кнопки — отправь сообщение сам: await context.bot.send_message(chat_id=update.effective_chat.id, text=..., reply_markup=...) и верни None.\n"
+    "- ЗАПРЕЩЕНО возвращать из execute словарь вида {'text': ..., 'reply_markup': ...} — платформа не умеет его показывать.\n"
+    "- handle_callback(update, context, data): обязан сам вызвать await query.answer() (query = update.callback_query) и сам изменить сообщение: await query.edit_message_text(text=..., reply_markup=...); оберни в try/except (ошибка 'message is not modified'). Верни True, если коллбэк твой, и False, если нет.\n"
+    "- ЗАПРЕЩЕНО возвращать из handle_callback словарь — платформа его игнорирует, кнопки будут мёртвыми.\n"
+    "- Состояние из JSON всегда сливай с дефолтом: base = default_dict(); base.update(loaded) — иначе старые сохранения упадут с KeyError.\n"
+    "- Ключ состояния выбирай осознанно: user_id — личный прогресс игрока, chat_id — общий прогресс чата.\n"
     "Имя команды пользователя: /{command} — используй именно его в ###COMMAND.\n"
     "Идея пользователя (что должен уметь мини-бот): {prompt}"
 )
@@ -397,6 +404,10 @@ AI_FIX_SYSTEM = (
     "Если в исходном коде есть глобальное состояние — исправь его именно этим способом,\n"
     "даже если пользователь не просил об этом явно (укажи в ###COMMENT, что исправил).\n"
     "ТЕКУЩИЙ КОД СКРИПТА:\n{code}\n\n"
+    "ПРОВЕРКА КОНТРАКТА ПЛАТФОРМЫ (обязательно):\n"
+    "- Если execute возвращает словарь — перепиши на строку или на самов отправку сообщения с return None.\n"
+    "- Если handle_callback возвращает словарь или не редактирует сообщение сам — перепиши: query.answer(), query.edit_message_text(...) в try/except, return True/False.\n"
+    "- Если состояние читается из JSON без слияния с дефолтом (риск KeyError на старых сохранениях) — добавь: base = default_dict(); base.update(data).\n"
     "Последняя правка (комментарий ИИ): {prev_comment}\n"
     "Запрос пользователя: {prompt}"
 )
@@ -867,7 +878,9 @@ async def handle_ai_creation(update: Update, context: ContextTypes.DEFAULT_TYPE,
               f"✅ Скрипт `{command}` готов и уже добавлен в список загруженных (`/listscripts`)!\nЗапуск: `{command}`" + (f"\n🤖 ИИ: {ai_comment}" if ai_comment else ""),
         out = out if isinstance(out, str) else out[0]
         try: await context.bot.edit_message_text(chat_id=wait.chat.id, message_id=wait.message_id, text=out[:4096], parse_mode='Markdown')
-        except Exception: await update.message.reply_text(out[:4096], parse_mode='Markdown')
+        except Exception:
+            try: await context.bot.edit_message_text(chat_id=wait.chat.id, message_id=wait.message_id, text=out[:4096])
+            except Exception: await update.message.reply_text(out[:4096])
 
 # ---------- ПОЧИНКА СКРИПТА ЧЕРЕЗ ИИ ----------
 
@@ -927,13 +940,16 @@ async def handle_ai_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     del ai_edit[uid]
     out = (res['notice'] + "\n\n" if res['notice'] else "") + f"✅ Скрипт `{st['command']}` исправлен ИИ и сохранён!\nПроверьте: `{st['command']}`" + (f"\n🤖 ИИ: {ai_comment}" if ai_comment else "")
     try: await context.bot.edit_message_text(chat_id=wait.chat.id, message_id=wait.message_id, text=out[:4096], parse_mode='Markdown')
-    except Exception: await update.message.reply_text(out[:4096], parse_mode='Markdown')
+    except Exception:
+        try: await context.bot.edit_message_text(chat_id=wait.chat.id, message_id=wait.message_id, text=out[:4096])
+        except Exception: await update.message.reply_text(out[:4096])
 
 # ---------- ИСПОЛНЕНИЕ СКРИПТОВ ----------
 
 async def execute_custom_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = str(update.effective_chat.id)
     user_id = update.effective_user.id
+    if update.message is None: return
     text = update.message.text
     if not text or not text.startswith('/'): return
     parts = text.split()
@@ -1103,6 +1119,7 @@ async def delete_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- МАРШРУТИЗАЦИЯ СООБЩЕНИЙ ----------
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message is None: return
     uid = update.effective_user.id
     text = update.message.text or ""
     # 1) Создание/починка мини-бота через ИИ (приоритет над ручной загрузкой)
@@ -1120,6 +1137,7 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await execute_custom_script(update, context)
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message is None: return
     if await handle_document_upload(update, context): return
     await run_triggers(update, context)
 
@@ -1127,7 +1145,7 @@ async def error_handler(update, context):
     logger.error(f"❌ Ошибка при обработке update: {context.error}")
     try:
         if update is not None and update.effective_message:
-            await update.effective_message.reply_text(f"⚠️ Внутренняя ошибка бота:\n`{context.error}`", parse_mode='Markdown')
+            await update.effective_message.reply_text(f"⚠️ Внутренняя ошибка бота:\n{context.error}")
     except Exception:
         pass
 
@@ -1150,6 +1168,256 @@ def acquire_single_instance_lock():
         print(f"⚠️ Не удалось поставить блокировку ({e}) — запускаюсь без неё.")
         return True
 
+# ==================== БРАУЗЕР-АГЕНТ (QWEN ЧЕРЕЗ БРАУЗЕР, ТОЛЬКО РАЗРАБ) ====================
+_qwen_profile = Path(__file__).parent / "qwen_profile"
+_PW = None
+_CTX = None
+_PAGE = None
+_AGENT_LOCK = asyncio.Lock()
+
+def _has_playwright():
+    try:
+        import playwright.async_api
+        return True
+    except Exception:
+        return False
+
+HAS_PW = _has_playwright()
+
+AGENT_SEL = 'a,button,textarea,input,[role="button"],[contenteditable="true"]'
+AGENT_JS = """() => {
+  const nodes = [...document.querySelectorAll('a,button,textarea,input,[role="button"],[contenteditable="true"]')];
+  const out = [];
+  nodes.forEach((n, i) => {
+    const r = n.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return;
+    const txt = (n.getAttribute('aria-label') || n.getAttribute('placeholder') || n.innerText || n.value || '').trim().replace(/\s+/g,' ').slice(0,80);
+    out.push({i, tag: n.tagName.toLowerCase(), text: txt});
+  });
+  return out.slice(0, 60);
+}"""
+
+AGENT_SYS = (
+    "Ты — браузер-агент на сайте chat.qwen.ai. Цель: отправить вопрос пользователя в чат Qwen и вернуть его полный ответ.\n"
+    "Каждый ход ты получаешь состояние страницы (url, элементы с индексами, хвост текста страницы).\n"
+    "Отвечай ОДНИМ JSON-объектом действия без пояснений:\n"
+    '{"action":"click","index":N} | {"action":"type","index":N,"text":"..."} | '
+    '{"action":"press","key":"Enter"} | {"action":"wait","seconds":5} | '
+    '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ Qwen"}\n'
+    "Тактика: найди поле ввода чата (textarea/contenteditable) -> type текста вопроса -> press Enter -> "
+    "wait 5-10 сек -> читай page_tail: если ответ ещё генерируется (видна кнопка Stop) — wait ещё; "
+    "когда готов — finish с ПОЛНЫМ текстом ответа из page_tail."
+)
+
+async def agent_ensure():
+    global _PW, _CTX, _PAGE
+    if not HAS_PW:
+        raise RuntimeError("Playwright не установлен. Добавь playwright в requirements.txt и перезапусти деплой.")
+    if _CTX: return
+    from playwright.async_api import async_playwright
+    _PW = await async_playwright().start()
+    _CTX = await _PW.chromium.launch_persistent_context(str(_qwen_profile), headless=True, viewport={"width": 1280, "height": 900}, locale="ru-RU")
+    _PAGE = _CTX.pages[0] if _CTX.pages else await _CTX.new_page()
+
+async def agent_logged_in():
+    try:
+        if "qwen" not in _PAGE.url.lower():
+            await _PAGE.goto("https://chat.qwen.ai", wait_until="domcontentloaded", timeout=30000)
+            await _PAGE.wait_for_timeout(3000)
+        sel = await _PAGE.query_selector('textarea, [contenteditable="true"]')
+        return sel is not None
+    except Exception:
+        return False
+
+async def agent_observe():
+    els = await _PAGE.evaluate(AGENT_JS)
+    tail = await _PAGE.evaluate("() => (document.body.innerText || '').slice(-1500)")
+    shot = await _PAGE.screenshot()
+    return els, tail, shot
+
+async def agent_act(a):
+    kind = a.get("action")
+    if kind == "goto":
+        await _PAGE.goto(a["url"], wait_until="domcontentloaded", timeout=30000)
+    elif kind == "click":
+        nodes = await _PAGE.query_selector_all(AGENT_SEL)
+        n = nodes[int(a["index"])]
+        await n.scroll_into_view_if_needed()
+        await n.click()
+    elif kind == "type":
+        nodes = await _PAGE.query_selector_all(AGENT_SEL)
+        n = nodes[int(a["index"])]
+        await n.click()
+        await _PAGE.keyboard.type(a["text"], delay=10)
+    elif kind == "press":
+        await _PAGE.keyboard.press(a.get("key", "Enter"))
+    elif kind == "wait":
+        await _PAGE.wait_for_timeout(min(30, int(a.get("seconds", 5))) * 1000)
+    elif kind == "scroll":
+        await _PAGE.mouse.wheel(0, 800 if a.get("dir") == "down" else -800)
+    await _PAGE.wait_for_timeout(1200)
+
+def agent_parse_json(content):
+    import re, json
+    m = re.search(r'\{.*\}', content, re.DOTALL)
+    if not m: return None
+    try: return json.loads(m.group(0))
+    except Exception: return None
+
+async def agent_task(prompt):
+    async with _AGENT_LOCK:
+        await agent_ensure()
+        if not await agent_logged_in():
+            return {"ok": False, "error": "not_logged_in"}
+        try:
+            for b in await _PAGE.query_selector_all('button, a'):
+                t = ((await b.inner_text()) or "").strip().lower()
+                if t in ("new chat", "новый чат"):
+                    await b.click(); await _PAGE.wait_for_timeout(1500); break
+        except Exception:
+            pass
+        idx, key = pick_key(active_key_index)
+        if not key:
+            return {"ok": False, "error": "no groq keys"}
+        msgs = [{"role": "system", "content": AGENT_SYS},
+                {"role": "user", "content": f"Задача: отправь Qwen этот вопрос и верни его полный ответ:\n{prompt}"}]
+        for _ in range(14):
+            els, tail, _ = await agent_observe()
+            msgs.append({"role": "user", "content": "Состояние страницы:\n" +
+                         json.dumps({"url": _PAGE.url, "elements": els, "page_tail": tail}, ensure_ascii=False)})
+            try:
+                r = requests.post(GROQ_URL, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                  json={"model": "openai/gpt-oss-120b", "messages": msgs, "max_completion_tokens": 1024}, timeout=60)
+                content = r.json()["choices"][0]["message"]["content"]
+            except Exception as e:
+                return {"ok": False, "error": f"groq error: {e}"}
+            msgs.append({"role": "assistant", "content": content})
+            action = agent_parse_json(content)
+            if not action:
+                continue
+            if action.get("action") == "finish":
+                return {"ok": True, "answer": action.get("answer", "")}
+            try:
+                await agent_act(action)
+            except Exception as e:
+                msgs.append({"role": "user", "content": f"Ошибка действия: {e}"})
+        return {"ok": False, "error": "step limit exceeded"}
+
+# ---------- Команды разработчика для Qwen-агента ----------
+
+async def _edit(msg, text):
+    try: await msg.edit_text(text[:4000])
+    except Exception:
+        try: await msg.reply_text(text[:4000])
+        except Exception: pass
+
+async def dev_qwen(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    parts = update.message.text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        return await update.message.reply_text("Использование: `/qwen <вопрос>`", parse_mode='Markdown')
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен. Добавь `playwright` в requirements.txt на bothost.ru и перезапусти деплой.")
+    wait = await update.message.reply_text("🌐 Браузер-агент спрашивает Qwen... это может занять до 2 минут.")
+    try:
+        res = await agent_task(parts[1])
+    except Exception as e:
+        await _edit(wait, f"❌ Ошибка агента: {str(e)[:300]}")
+        return
+    if not res.get("ok"):
+        err = res.get("error", "неизвестная ошибка")
+        hint = "\nСначала залогинься: /qurl https://chat.qwen.ai → /qshot → /qclick N, /qtype N текст, /qenter." if err == "not_logged_in" else ""
+        await _edit(wait, f"❌ Агент: {err}{hint}")
+        return
+    ans = res.get("answer", "")[:4000]
+    try: await context.bot.edit_message_text(chat_id=wait.chat.id, message_id=wait.message_id, text=f"🤖 *Qwen отвечает:*\n{ans}", parse_mode='Markdown')
+    except Exception:
+        try: await context.bot.edit_message_text(chat_id=wait.chat.id, message_id=wait.message_id, text=f"🤖 Qwen отвечает:\n{ans}")
+        except Exception: await update.message.reply_text(f"🤖 Qwen отвечает:\n{ans}")
+
+async def dev_qshot(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен.")
+    try:
+        await agent_ensure()
+        els, tail, shot = await agent_observe()
+    except Exception as e:
+        return await update.message.reply_text(f"❌ {str(e)[:200]}")
+    import base64, io
+    img = base64.b64decode(base64.b64encode(shot).decode())
+    lines = [f"{e['i']}: <{e['tag']}> {e['text'][:50]}" for e in els[:40]]
+    caption = f"URL: {_PAGE.url}\nЭлементы:\n" + "\n".join(lines)
+    await update.message.reply_photo(photo=io.BytesIO(img), filename="page.png", caption=caption[:1000])
+
+async def dev_qclick(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен.")
+    if not context.args: return await update.message.reply_text("Использование: `/qclick N`", parse_mode='Markdown')
+    try:
+        await agent_ensure()
+        await agent_act({"action": "click", "index": int(context.args[0])})
+        await update.message.reply_text("✅ Клик выполнен. /qshot для проверки.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)[:200]}")
+
+async def dev_qtype(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен.")
+    if len(context.args) < 2: return await update.message.reply_text("Использование: `/qtype N текст`", parse_mode='Markdown')
+    text = update.message.text.split(maxsplit=2)[2]
+    try:
+        await agent_ensure()
+        await agent_act({"action": "type", "index": int(context.args[0]), "text": text})
+        await update.message.reply_text("✅ Текст введён.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)[:200]}")
+
+async def dev_qenter(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен.")
+    key = context.args[0] if context.args else "Enter"
+    try:
+        await agent_ensure()
+        await agent_act({"action": "press", "key": key})
+        await update.message.reply_text("✅ Нажато.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)[:200]}")
+
+async def dev_qurl(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен.")
+    if not context.args: return await update.message.reply_text("Использование: `/qurl https://...`", parse_mode='Markdown')
+    try:
+        await agent_ensure()
+        await agent_act({"action": "goto", "url": context.args[0]})
+        await update.message.reply_text(f"✅ Открыто: {_PAGE.url}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)[:200]}")
+
+async def dev_qstatus(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not HAS_PW:
+        return await update.message.reply_text("❌ Playwright не установлен. Добавь `playwright` в requirements.txt на bothost.ru.")
+    try:
+        await agent_ensure()
+        logged = await agent_logged_in()
+        st = "✅ залогинен" if logged else "❌ не залогинен"
+        await update.message.reply_text(f"🖥️ Браузер жив. Логин Qwen: {st}\nURL: {_PAGE.url}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)[:200]}")
+
 def main():
     if not acquire_single_instance_lock():
         print("❌ Бот УЖЕ запущен в другом процессе! Выходим, чтобы не перехватывать обновления.")
@@ -1171,6 +1439,13 @@ def main():
     application.add_handler(CommandHandler("keys", dev_keys))
     application.add_handler(CommandHandler("usekey", dev_usekey))
     application.add_handler(CommandHandler("delkey", dev_delkey))
+    application.add_handler(CommandHandler("qwen", dev_qwen))
+    application.add_handler(CommandHandler("qshot", dev_qshot))
+    application.add_handler(CommandHandler("qclick", dev_qclick))
+    application.add_handler(CommandHandler("qtype", dev_qtype))
+    application.add_handler(CommandHandler("qenter", dev_qenter))
+    application.add_handler(CommandHandler("qurl", dev_qurl))
+    application.add_handler(CommandHandler("qstatus", dev_qstatus))
     application.add_handler(CommandHandler("addscript", add_script))
     application.add_handler(CommandHandler("listscripts", list_scripts))
     application.add_handler(CommandHandler("viewscript", view_script))
