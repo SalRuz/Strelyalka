@@ -78,7 +78,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-BOT_TOKEN = "8409277791:AAFp6eEWnXQ3Q8tC24SJDvd9_lyPY8Q61ZM"
+BOT_TOKEN = "8271478255:AAG0PDYzM1YLGTjokJqSMaJhjRiiPdm7df4"
 DEVELOPER_ID = 1170970828  # ID разработчика (команды управления ключами)
 
 DATA_DIR = Path("data")
