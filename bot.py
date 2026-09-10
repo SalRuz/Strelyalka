@@ -1237,7 +1237,7 @@ def agent_sys(site):
         "Отвечай ОДНИМ JSON-объектом действия без пояснений:\n"
         '{"action":"click","index":N} | {"action":"type","index":N,"text":"..."} | '
         '{"action":"press","key":"Enter"} | {"action":"wait","seconds":5} | '
-        '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ модели"}\n"
+        '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ модели"}\n'
         "Тактика: найди поле ввода чата (textarea/contenteditable) -> type текста -> press Enter -> "
         "wait 5-10 сек -> читай page_tail: если ответ ещё генерируется (видна кнопка Stop) — wait ещё; "
         "когда готов — finish с ПОЛНЫМ текстом ответа из page_tail."
