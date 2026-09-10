@@ -647,10 +647,7 @@ async def add_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_scripts[user_id] = {
         'chat_id': chat_id, 'code': '', 'command': None, 'description': 'Без описания', 'stage': 'waiting_first'
     }
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Помощь бота", callback_data="aicreate_start")],
-        [InlineKeyboardButton("🧠 Помощь спец бота", callback_data="aicreate_special")],
-    ])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🤖 Помощь бота", callback_data="aicreate_start")]])
     await update.message.reply_text(
         "📝 *Отправьте скрипт в следующем формате:*\n\n"
         "```\n"
@@ -691,10 +688,7 @@ async def edit_script(update: Update, context: ContextTypes.DEFAULT_TYPE):
     script_info = get_script_from_db(chat_id, command)
     if not script_info: return await update.message.reply_text(f"❌ Скрипт `{command}` не найден!", parse_mode='Markdown')
     editing_scripts[user_id] = {'chat_id': chat_id, 'command': command, 'code': '', 'stage': 'waiting_new_code'}
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🤖 Помощь бота (починить через ИИ)", callback_data=f"aiedit_start:{command}")],
-        [InlineKeyboardButton("🧠 Помощь спец бота", callback_data=f"aiedit_special:{command}")],
-    ])
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🤖 Помощь бота (починить через ИИ)", callback_data=f"aiedit_start:{command}")]])
     await update.message.reply_text(f"✏️ *Редактирование* `{command}`. Отправьте новый код.\n🤖 Или нажмите кнопку и опишите неполадку словами — ИИ сам исправит скрипт.", parse_mode='Markdown', reply_markup=kb)
 
 def parse_script_text(text):
@@ -829,9 +823,6 @@ async def handle_ai_creation(update: Update, context: ContextTypes.DEFAULT_TYPE,
             parse_mode='Markdown')
 
     if st['stage'] == 'prompt':
-        if st.get('special'):
-            await handle_ai_creation_special(update, context, text, st)
-            return
         wait = await update.message.reply_text("🤖 Создаю скрипт... Обычно это занимает до минуты. Не прерывайте.")
         sys_prompt = AI_SCRIPT_SYSTEM.format(command=st['name'], prompt=text)
         msgs = [
@@ -896,9 +887,6 @@ async def handle_ai_creation(update: Update, context: ContextTypes.DEFAULT_TYPE,
 async def handle_ai_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
     uid = update.effective_user.id
     st = ai_edit[uid]
-    if st.get('special'):
-        await handle_ai_edit_special(update, context, text, st)
-        return
     wait = await update.message.reply_text("🤖 Анализирую и исправляю скрипт... Обычно до минуты. Не прерывайте.")
     sinfo = get_script_from_db(st['chat_id'], st['command'])
     if not sinfo:
@@ -1057,22 +1045,6 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
         await query.answer()
         await cb_aicreate_start(query, context)
         return
-    if data == "aicreate_special":
-        await query.answer()
-        await cb_aicreate_start(query, context, special=True)
-        return
-    if data.startswith("aiedit_special:"):
-        await query.answer()
-        cmd = data.split(":", 1)[1]
-        uid = query.from_user.id
-        pending_scripts.pop(uid, None)
-        editing_scripts.pop(uid, None)
-        ai_creation.pop(uid, None)
-        ai_edit[uid] = {'chat_id': str(query.message.chat.id), 'command': cmd, 'stage': 'prompt', 'special': True}
-        await query.message.reply_text(
-            f"🧠 *Спец-бот (Qwen→Grok через браузер)* починит скрипт `{cmd}`.\nОтправьте промт: опишите своими словами, что исправить или улучшить.\n\n⚠️ `/cancel` - отменить",
-            parse_mode='Markdown')
-        return
     if data.startswith("aiedit_start:"):
         await query.answer()
         cmd = data.split(":", 1)[1]
@@ -1196,19 +1168,13 @@ def acquire_single_instance_lock():
         print(f"⚠️ Не удалось поставить блокировку ({e}) — запускаюсь без неё.")
         return True
 
-# ==================== БРАУЗЕР-АГЕНТЫ (СПЕЦ-БОТЫ: QWEN & GROK) ====================
-AGENT_TARGETS = {
-    "qwen": {"url": "https://chat.qwen.ai", "profile": "qwen_profile", "site": "chat.qwen.ai"},
-    "grok": {"url": "https://grok.com", "profile": "grok_profile", "site": "grok.com"},
-    "chatgpt": {"url": "https://chatgpt.com", "profile": "chatgpt_profile", "site": "chatgpt.com"},
-}
-SPECIAL_ORDER = ["qwen", "chatgpt", "grok"]
+# ==================== QWEN BROWSER AGENT (ТОЛЬКО РАЗРАБ) ====================
+_qwen_profile = Path(__file__).parent / "qwen_profile"
+AGENT_PROXY = ""   # при желании: "http://user:pass@host:port"
 _pw = None
-_CTXS = {}
-_PAGES = {}
-_AGENT_LOCK = asyncio.Lock()
-AGENT_TARGET = "qwen"
-AGENT_PROXY = ""   # при желании: "http://user:pass@host:port" (residential, иначе Cloudflare снова забанит)
+_CTX = None
+_PAGE = None
+_QLOCK = asyncio.Lock()
 
 def _has_playwright():
     try:
@@ -1219,8 +1185,8 @@ def _has_playwright():
 
 HAS_PW = _has_playwright()
 
-AGENT_SEL = 'a,button,textarea,input,[role="button"],[contenteditable="true"]'
-AGENT_JS = """() => {
+Q_SEL = 'a,button,textarea,input,[role="button"],[contenteditable="true"]'
+Q_JS = """() => {
   const nodes = [...document.querySelectorAll('a,button,textarea,input,[role="button"],[contenteditable="true"]')];
   const out = [];
   nodes.forEach((n, i) => {
@@ -1232,18 +1198,17 @@ AGENT_JS = """() => {
   return out.slice(0, 60);
 }"""
 
-def agent_sys(site):
-    return (
-        f"Ты — браузер-агент на сайте {site}. Цель: отправить переданный текст в чат и вернуть ПОЛНЫЙ ответ модели.\n"
-        "Каждый ход ты получаешь состояние страницы (url, элементы с индексами, хвост текста страницы).\n"
-        "Отвечай ОДНИМ JSON-объектом действия без пояснений:\n"
-        '{"action":"click","index":N} | {"action":"type","index":N,"text":"..."} | '
-        '{"action":"press","key":"Enter"} | {"action":"wait","seconds":5} | '
-        '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ модели"}\n'
-        "Тактика: найди поле ввода чата (textarea/contenteditable) -> type текста -> press Enter -> "
-        "wait 5-10 сек -> читай page_tail: если ответ ещё генерируется (видна кнопка Stop) — wait ещё; "
-        "когда готов — finish с ПОЛНЫМ текстом ответа из page_tail."
-    )
+Q_SYS = (
+    "Ты — браузер-агент на сайте chat.qwen.ai. Цель: отправить переданный текст в чат и вернуть ПОЛНЫЙ ответ модели.\n"
+    "Каждый ход ты получаешь состояние страницы (url, элементы с индексами, хвост текста страницы).\n"
+    "Отвечай ОДНИМ JSON-объектом действия без пояснений:\n"
+    '{"action":"click","index":N} | {"action":"type","index":N,"text":"..."} | '
+    '{"action":"press","key":"Enter"} | {"action":"wait","seconds":5} | '
+    '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ модели"}\n"
+    "Тактика: найди поле ввода чата (textarea/contenteditable) -> type текста -> press Enter -> "
+    "wait 5-10 сек -> читай page_tail: если ответ ещё генерируется (видна кнопка Stop) — wait ещё; "
+    "когда готов — finish с ПОЛНЫМ текстом ответа из page_tail."
+)
 
 async def _edit(msg, text):
     try: await msg.edit_text(text[:4000])
@@ -1251,16 +1216,13 @@ async def _edit(msg, text):
         try: await msg.reply_text(text[:4000])
         except Exception: pass
 
-async def agent_ensure(target=None):
-    global _pw
-    target = target or AGENT_TARGET
+async def q_ensure():
+    global _pw, _CTX, _PAGE
     if not HAS_PW:
         raise RuntimeError("Playwright не установлен. Добавь playwright в requirements.txt и перезапусти деплой.")
-    if target in _CTXS: return
+    if _CTX: return
     from playwright.async_api import async_playwright
-    if _pw is None:
-        _pw = await async_playwright().start()
-    cfg = AGENT_TARGETS[target]
+    _pw = await async_playwright().start()
     opts = {
         "headless": True,
         "viewport": {"width": 1280, "height": 900},
@@ -1272,82 +1234,75 @@ async def agent_ensure(target=None):
     }
     if AGENT_PROXY:
         opts["proxy"] = {"server": AGENT_PROXY}
-    ctx = await _pw.chromium.launch_persistent_context(str(Path(__file__).parent / cfg["profile"]), **opts)
+    _CTX = await _pw.chromium.launch_persistent_context(str(_qwen_profile), **opts)
     try:
-        await ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+        await _CTX.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
     except Exception:
         pass
-    _CTXS[target] = ctx
-    _PAGES[target] = ctx.pages[0] if ctx.pages else await ctx.new_page()
+    _PAGE = _CTX.pages[0] if _CTX.pages else await _CTX.new_page()
 
-async def agent_logged_in(target=None):
-    target = target or AGENT_TARGET
-    page = _PAGES[target]
+async def q_logged_in():
     try:
-        if target not in page.url.lower():
-            await page.goto(AGENT_TARGETS[target]["url"], wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(3000)
-        sel = await page.query_selector('textarea, [contenteditable="true"]')
+        if "qwen" not in _PAGE.url.lower():
+            await _PAGE.goto("https://chat.qwen.ai", wait_until="domcontentloaded", timeout=30000)
+            await _PAGE.wait_for_timeout(3000)
+        sel = await _PAGE.query_selector('textarea, [contenteditable="true"]')
         return sel is not None
     except Exception:
         return False
 
-async def agent_observe(target=None):
-    page = _PAGES[target or AGENT_TARGET]
-    els = await page.evaluate(AGENT_JS)
-    tail = await page.evaluate("() => (document.body.innerText || '').slice(-1500)")
-    shot = await page.screenshot()
+async def q_observe():
+    els = await _PAGE.evaluate(Q_JS)
+    tail = await _PAGE.evaluate("() => (document.body.innerText || '').slice(-1500)")
+    shot = await _PAGE.screenshot()
     return els, tail, shot
 
-async def agent_act(a, target=None):
-    page = _PAGES[target or AGENT_TARGET]
+async def q_act(a):
     kind = a.get("action")
     if kind == "goto":
-        await page.goto(a["url"], wait_until="domcontentloaded", timeout=30000)
+        await _PAGE.goto(a["url"], wait_until="domcontentloaded", timeout=30000)
     elif kind == "click":
-        nodes = await page.query_selector_all(AGENT_SEL)
+        nodes = await _PAGE.query_selector_all(Q_SEL)
         n = nodes[int(a["index"])]
         await n.scroll_into_view_if_needed()
         await n.click()
     elif kind == "type":
-        nodes = await page.query_selector_all(AGENT_SEL)
+        nodes = await _PAGE.query_selector_all(Q_SEL)
         n = nodes[int(a["index"])]
         await n.click()
-        await page.keyboard.type(a["text"], delay=10)
+        await _PAGE.keyboard.type(a["text"], delay=10)
     elif kind == "press":
-        await page.keyboard.press(a.get("key", "Enter"))
+        await _PAGE.keyboard.press(a.get("key", "Enter"))
     elif kind == "wait":
-        await page.wait_for_timeout(min(30, int(a.get("seconds", 5))) * 1000)
+        await _PAGE.wait_for_timeout(min(30, int(a.get("seconds", 5))) * 1000)
     elif kind == "scroll":
-        await page.mouse.wheel(0, 800 if a.get("dir") == "down" else -800)
-    await page.wait_for_timeout(1200)
+        await _PAGE.mouse.wheel(0, 800 if a.get("dir") == "down" else -800)
+    await _PAGE.wait_for_timeout(1200)
 
-def agent_parse_json(content):
+def q_parse_json(content):
     m = re.search(r'\{.*\}', content, re.DOTALL)
     if not m: return None
     try: return json.loads(m.group(0))
     except Exception: return None
 
-async def agent_task(prompt, target=None):
-    target = target or AGENT_TARGET
-    async with _AGENT_LOCK:
-        await agent_ensure(target)
-        if not await agent_logged_in(target):
-            return {"ok": False, "error": f"not_logged_in:{target}"}
-        page = _PAGES[target]
+async def q_task(prompt):
+    async with _QLOCK:
+        await q_ensure()
+        if not await q_logged_in():
+            return {"ok": False, "error": "not_logged_in:qwen"}
         try:
-            for b in await page.query_selector_all('button, a'):
+            for b in await _PAGE.query_selector_all('button, a'):
                 t = ((await b.inner_text()) or "").strip().lower()
                 if t in ("new chat", "новый чат"):
-                    await b.click(); await page.wait_for_timeout(1500); break
+                    await b.click(); await _PAGE.wait_for_timeout(1500); break
         except Exception:
             pass
-        msgs = [{"role": "system", "content": agent_sys(AGENT_TARGETS[target]["site"])},
+        msgs = [{"role": "system", "content": Q_SYS},
                 {"role": "user", "content": f"Задача: отправь в чат следующий текст и верни полный ответ модели:\n{prompt}"}]
         for _ in range(14):
-            els, tail, _ = await agent_observe(target)
+            els, tail, _ = await q_observe()
             msgs.append({"role": "user", "content": "Состояние страницы:\n" +
-                         json.dumps({"url": page.url, "elements": els, "page_tail": tail}, ensure_ascii=False)})
+                         json.dumps({"url": _PAGE.url, "elements": els, "page_tail": tail}, ensure_ascii=False)})
             content = None
             for _try in range(max(1, len(api_keys))):
                 idx, key = pick_key(active_key_index)
@@ -1377,130 +1332,16 @@ async def agent_task(prompt, target=None):
             if content is None:
                 return {"ok": False, "error": "groq: нет доступных ключей (все в лимите или невалидны)"}
             msgs.append({"role": "assistant", "content": content})
-            action = agent_parse_json(content)
+            action = q_parse_json(content)
             if not action:
                 continue
             if action.get("action") == "finish":
-                return {"ok": True, "answer": action.get("answer", ""), "target": target}
+                return {"ok": True, "answer": action.get("answer", "")}
             try:
-                await agent_act(action, target)
+                await q_act(action)
             except Exception as ex:
                 msgs.append({"role": "user", "content": f"Ошибка действия: {ex}"})
         return {"ok": False, "error": "step limit exceeded"}
-
-# ---------- Спец-боты: генерация и починка скриптов через браузер ----------
-
-def special_instruction_create(command, prompt):
-    return (
-        "Ты — генератор кода для платформы Telegram-ботов (python-telegram-bot v20+, asyncio).\n"
-        "Верни скрипт СТРОГО в формате, без пояснений и без markdown-ограждений:\n"
-        f"###COMMAND: /{command}\n"
-        "###DESCRIPTION: короткое описание на русском\n"
-        "###COMMENT: 1-2 предложения на русском: что делает скрипт\n"
-        "###CODE:\n"
-        "<python код>\n"
-        "Требования к коду:\n"
-        "- Определи async def execute(update, context, args) — точку входа; может вернуть строку-ответ.\n"
-        "- При желании async def check_triggers(update, context) и async def handle_callback(update, context, data).\n"
-        "- В namespace УЖЕ есть (не импортируй): update, context, args, requests, asyncio, json, re, math, random, datetime, time, os, sys, sqlite3, hashlib, base64, pathlib, DB_PATH, DATA_DIR, InlineKeyboardButton, InlineKeyboardMarkup.\n"
-        "- Состояние храни ТОЛЬКО в sqlite3 через DB_PATH; глобальные переменные для состояния запрещены.\n"
-        "- handle_callback сам вызывает query.answer() и query.edit_message_text(...), возвращает True/False.\n"
-        f"Имя команды: /{command}.\n"
-        f"Запрос пользователя (идея мини-бота): {prompt}\n"
-        "Ответь ТОЛЬКО блоком в указанном формате."
-    )
-
-def special_instruction_fix(code, prompt):
-    return (
-        "Ты — ремонтник кода скриптов Telegram-бота (python-telegram-bot v20+, asyncio).\n"
-        "Дан текущий код и запрос. Верни ИСПРАВЛЕННЫЙ скрипт ЦЕЛИКОМ, строго в формате, без ограждений:\n"
-        "###DESCRIPTION: короткое описание на русском\n"
-        "###COMMENT: 1-2 предложения на русском: что изменено\n"
-        "###CODE:\n"
-        "<полный python код>\n"
-        "Правила: сохрани async def execute(update, context, args); состояние только в sqlite3 через DB_PATH; "
-        "handle_callback сам делает query.answer() и edit_message_text, возвращает True/False.\n"
-        f"ТЕКУЩИЙ КОД:\n{code}\n\nЗАПРОС: {prompt}\n"
-        "Ответь ТОЛЬКО блоком в указанном формате."
-    )
-
-async def special_generate(instruction):
-    errs = []
-    for target in SPECIAL_ORDER:
-        try:
-            res = await agent_task(instruction, target)
-        except Exception as e:
-            errs.append(f"{target}: {str(e)[:120]}")
-            continue
-        if res.get("ok"):
-            return res, target
-        errs.append(f"{target}: {res.get('error', 'ошибка')[:120]}")
-    return {"ok": False, "error": " | ".join(errs) or "все спец-боты недоступны"}, None
-
-async def handle_ai_creation_special(update, context, text, st):
-    wait = await update.message.reply_text("🧠 Спец-бот (Qwen→Grok через браузер) создаёт скрипт... это может занять несколько минут.")
-    res, target = await special_generate(special_instruction_create(st['name'], text))
-    if not res or not res.get("ok"):
-        st['stage'] = 'prompt'
-        err = (res or {}).get('error', 'неизвестная ошибка')
-        await _edit(wait, f"❌ Спец-бот не смог создать скрипт: {err}\nОтправь промт ещё раз или /cancel.")
-        return
-    raw = clean_fences(res.get("answer", ""))
-    ai_comment = extract_ai_comment(raw)
-    cmd_parsed, desc, code = parse_script_text(raw)
-    if not code.strip(): code = raw
-    if 'async def execute' not in code:
-        st['stage'] = 'prompt'
-        await _edit(wait, "❌ Спец-бот не вернул корректный код. Сформулируй промт иначе и отправь снова.")
-        return
-    try:
-        compile(code, '<special>', 'exec')
-    except SyntaxError as e:
-        st['stage'] = 'prompt'
-        await _edit(wait, f"❌ Ошибка синтаксиса в коде спец-бота: {e}\nОтправь промт ещё раз.")
-        return
-    command = '/' + st['name']
-    save_script_to_db(st['chat_id'], command, desc if desc != "Без описания" else f"Мини-бот от спец-агента ({target})",
-                      code, (update.effective_user.username or 'user') + f' (спец: {target})', update.effective_user.id, ai_comment=ai_comment)
-    save_data()
-    del ai_creation[update.effective_user.id]
-    out = f"✅ Скрипт `{command}` готов через спец-бота ({target})! Добавлен в `/listscripts`."
-    if ai_comment: out += f"\n🧠 Комментарий: {ai_comment}"
-    await _edit(wait, out)
-
-async def handle_ai_edit_special(update, context, text, st):
-    wait = await update.message.reply_text(f"🧠 Спец-бот (Qwen→Grok через браузер) чинит скрипт `{st['command']}`... это может занять несколько минут.")
-    sinfo = get_script_from_db(st['chat_id'], st['command'])
-    if not sinfo:
-        del ai_edit[update.effective_user.id]
-        await _edit(wait, "❌ Скрипт не найден.")
-        return
-    res, target = await special_generate(special_instruction_fix(sinfo['code'], text))
-    if not res or not res.get("ok"):
-        err = (res or {}).get('error', 'неизвестная ошибка')
-        await _edit(wait, f"❌ Спец-бот не смог починить скрипт: {err}\nОтправь промт ещё раз или /cancel.")
-        return
-    raw = clean_fences(res.get("answer", ""))
-    ai_comment = extract_ai_comment(raw)
-    cmd_parsed, desc, code = parse_script_text(raw)
-    if not code.strip(): code = raw
-    if 'async def execute' not in code:
-        await _edit(wait, "❌ Спец-бот не вернул корректный код. Отправь промт ещё раз.")
-        return
-    try:
-        compile(code, '<special_fix>', 'exec')
-    except SyntaxError as e:
-        await _edit(wait, f"❌ Ошибка синтаксиса в исправленном коде: {e}\nОтправь промт ещё раз.")
-        return
-    save_script_to_db(st['chat_id'], st['command'], desc if desc != "Без описания" else sinfo['description'],
-                      code, (update.effective_user.username or 'user') + f' (спец: {target})', update.effective_user.id, ai_comment=ai_comment)
-    save_data()
-    del ai_edit[update.effective_user.id]
-    out = f"✅ Скрипт `{st['command']}` исправлен спец-ботом ({target})!"
-    if ai_comment: out += f"\n🧠 Комментарий: {ai_comment}"
-    await _edit(wait, out)
-
-# ---------- Dev-команды агентов ----------
 
 async def dev_qwen(update, context):
     if not is_dev(update.effective_user.id):
@@ -1512,136 +1353,60 @@ async def dev_qwen(update, context):
         return await update.message.reply_text("❌ Playwright не установлен.")
     wait = await update.message.reply_text("🌐 Браузер-агент спрашивает Qwen... до 2 минут.")
     try:
-        res = await agent_task(parts[1], "qwen")
+        res = await q_task(parts[1])
     except Exception as e:
         await _edit(wait, f"❌ Ошибка агента: {str(e)[:300]}")
         return
     if not res.get("ok"):
         err = res.get("error", "ошибка")
-        hint = "\nЛогин: /qtarget qwen → /qurl https://chat.qwen.ai → /qshot → /qclick N, /qtype N текст, /qenter." if err.startswith("not_logged_in") else ""
+        hint = "\nЛогин: /qcurl https://chat.qwen.ai → /qcurl click N, /qcurl type N текст, /qcurl enter." if err.startswith("not_logged_in") else ""
         await _edit(wait, f"❌ Агент Qwen: {err}{hint}")
         return
     await _edit(wait, "🤖 *Qwen отвечает:*\n" + str(res.get("answer", ""))[:4000])
 
-async def dev_grok(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    parts = update.message.text.split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        return await update.message.reply_text("Использование: `/grok <вопрос>`", parse_mode='Markdown')
-    if not HAS_PW:
-        return await update.message.reply_text("❌ Playwright не установлен.")
-    wait = await update.message.reply_text("🌐 Браузер-агент спрашивает Grok... до 2 минут.")
-    try:
-        res = await agent_task(parts[1], "grok")
-    except Exception as e:
-        await _edit(wait, f"❌ Ошибка агента: {str(e)[:300]}")
-        return
-    if not res.get("ok"):
-        err = res.get("error", "ошибка")
-        hint = "\nЛогин: /qtarget grok → /qurl https://grok.com → /qshot → /qclick N, /qtype N текст, /qenter." if err.startswith("not_logged_in") else ""
-        await _edit(wait, f"❌ Агент Grok: {err}{hint}")
-        return
-    await _edit(wait, "🤖 *Grok отвечает:*\n" + str(res.get("answer", ""))[:4000])
-
-async def dev_qtarget(update, context):
-    global AGENT_TARGET
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    if not context.args or context.args[0] not in AGENT_TARGETS:
-        return await update.message.reply_text("Использование: `/qtarget qwen|grok`", parse_mode='Markdown')
-    AGENT_TARGET = context.args[0]
-    await update.message.reply_text(f"🎯 Цель команд настройки: {AGENT_TARGET}")
-
-async def dev_qshot(update, context):
+async def dev_qcurl(update, context):
     if not is_dev(update.effective_user.id):
         return await update.message.reply_text("⛳ Команда доступна только разработчику.")
     if not HAS_PW:
         return await update.message.reply_text("❌ Playwright не установлен.")
+    args = context.args or []
     try:
-        await agent_ensure()
-        els, tail, shot = await agent_observe()
+        await q_ensure()
+        if not args:
+            return await update.message.reply_text(
+                "Использование:\n`/qcurl <url>` — открыть страницу + скрин + элементы\n"
+                "`/qcurl shot` — скрин + элементы\n"
+                "`/qcurl click N` — клик по элементу N\n"
+                "`/qcurl type N текст` — ввод в элемент N\n"
+                "`/qcurl enter [клавиша]` — нажатие\n"
+                "`/qcurl text` — текст страницы (хвост)", parse_mode='Markdown')
+        cmd = args[0].lower()
+        if cmd == "shot":
+            els, tail, shot = await q_observe()
+        elif cmd.startswith("http"):
+            await q_act({"action": "goto", "url": args[0]})
+            els, tail, shot = await q_observe()
+        elif cmd == "click":
+            await q_act({"action": "click", "index": int(args[1])})
+            return await update.message.reply_text("✅ Клик выполнен. /qcurl shot для проверки.")
+        elif cmd == "type":
+            text = update.message.text.split(maxsplit=3)[3] if len(args) > 2 else ""
+            await q_act({"action": "type", "index": int(args[1]), "text": text})
+            return await update.message.reply_text("✅ Текст введён.")
+        elif cmd == "enter":
+            await q_act({"action": "press", "key": args[1] if len(args) > 1 else "Enter"})
+            return await update.message.reply_text("✅ Нажато.")
+        elif cmd == "text":
+            tail = await _PAGE.evaluate("() => (document.body.innerText || '').slice(-1500)")
+            return await update.message.reply_text(f"📄 {_PAGE.url}\n{tail}")
+        else:
+            return await update.message.reply_text("❓ Неизвестная подкоманда. `/qcurl` — справка.", parse_mode='Markdown')
+        import io
+        lines = [f"{x['i']}: <{x['tag']}> {x['text'][:50]}" for x in els[:40]]
+        caption = f"URL: {_PAGE.url}\nЭлементы:\n" + "\n".join(lines)
+        await update.message.reply_photo(photo=io.BytesIO(shot), filename="page.png", caption=caption[:1000])
     except Exception as e:
-        return await update.message.reply_text(f"❌ {str(e)[:200]}")
-    import io
-    lines = [f"{x['i']}: <{x['tag']}> {x['text'][:50]}" for x in els[:40]]
-    caption = f"[{AGENT_TARGET}] URL: {_PAGES[AGENT_TARGET].url}\nЭлементы:\n" + "\n".join(lines)
-    await update.message.reply_photo(photo=io.BytesIO(shot), filename="page.png", caption=caption[:1000])
-
-async def dev_qclick(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    if not context.args: return await update.message.reply_text("Использование: `/qclick N`", parse_mode='Markdown')
-    try:
-        await agent_ensure()
-        await agent_act({"action": "click", "index": int(context.args[0])})
-        await update.message.reply_text("✅ Клик выполнен. /qshot для проверки.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:200]}")
-
-async def dev_qclicktext(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    parts = update.message.text.split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        return await update.message.reply_text("Использование: `/qclicktext текст элемента`", parse_mode='Markdown')
-    try:
-        await agent_ensure()
-        page = _PAGES[AGENT_TARGET]
-        loc = page.get_by_text(parts[1], exact=False).first
-        await loc.scroll_into_view_if_needed()
-        await loc.click(timeout=15000)
-        await page.wait_for_timeout(1200)
-        await update.message.reply_text(f"✅ Кликнул по тексту «{parts[1]}». /qshot для проверки.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:200]}")
-
-async def dev_qtype(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    if len(context.args) < 2: return await update.message.reply_text("Использование: `/qtype N текст`", parse_mode='Markdown')
-    text = update.message.text.split(maxsplit=2)[2]
-    try:
-        await agent_ensure()
-        await agent_act({"action": "type", "index": int(context.args[0]), "text": text})
-        await update.message.reply_text("✅ Текст введён.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:200]}")
-
-async def dev_qenter(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    key = context.args[0] if context.args else "Enter"
-    try:
-        await agent_ensure()
-        await agent_act({"action": "press", "key": key})
-        await update.message.reply_text("✅ Нажато.")
-    except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:200]}")
-
-async def dev_qurl(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    if not context.args: return await update.message.reply_text("Использование: `/qurl https://...`", parse_mode='Markdown')
-    try:
-        await agent_ensure()
-        await agent_act({"action": "goto", "url": context.args[0]})
-        await update.message.reply_text(f"✅ Открыто: {_PAGES[AGENT_TARGET].url}")
-    except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:200]}")
-
-async def dev_qstatus(update, context):
-    if not is_dev(update.effective_user.id):
-        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
-    if not HAS_PW:
-        return await update.message.reply_text("❌ Playwright не установлен. Добавь `playwright` в requirements.txt.")
-    try:
-        await agent_ensure()
-        logged = await agent_logged_in()
-        st = "✅ залогинен" if logged else "❌ не залогинен"
-        await update.message.reply_text(f"🖥 Цель: {AGENT_TARGET} (смена: /qtarget qwen|grok)\nЛогин: {st}\nURL: {_PAGES[AGENT_TARGET].url}")
-    except Exception as e:
-        await update.message.reply_text(f"❌ {str(e)[:200]}")
+        await update.message.reply_text(f"❌ {str(e)[:250]}")
 
 def main():
     if not acquire_single_instance_lock():
@@ -1665,15 +1430,7 @@ def main():
     application.add_handler(CommandHandler("usekey", dev_usekey))
     application.add_handler(CommandHandler("delkey", dev_delkey))
     application.add_handler(CommandHandler("qwen", dev_qwen))
-    application.add_handler(CommandHandler("grok", dev_grok))
-    application.add_handler(CommandHandler("qtarget", dev_qtarget))
-    application.add_handler(CommandHandler("qshot", dev_qshot))
-    application.add_handler(CommandHandler("qclick", dev_qclick))
-    application.add_handler(CommandHandler("qclicktext", dev_qclicktext))
-    application.add_handler(CommandHandler("qtype", dev_qtype))
-    application.add_handler(CommandHandler("qenter", dev_qenter))
-    application.add_handler(CommandHandler("qurl", dev_qurl))
-    application.add_handler(CommandHandler("qstatus", dev_qstatus))
+    application.add_handler(CommandHandler("qcurl", dev_qcurl))
     application.add_handler(CommandHandler("addscript", add_script))
     application.add_handler(CommandHandler("listscripts", list_scripts))
     application.add_handler(CommandHandler("viewscript", view_script))
