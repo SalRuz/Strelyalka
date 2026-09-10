@@ -1200,13 +1200,15 @@ def acquire_single_instance_lock():
 AGENT_TARGETS = {
     "qwen": {"url": "https://chat.qwen.ai", "profile": "qwen_profile", "site": "chat.qwen.ai"},
     "grok": {"url": "https://grok.com", "profile": "grok_profile", "site": "grok.com"},
+    "chatgpt": {"url": "https://chatgpt.com", "profile": "chatgpt_profile", "site": "chatgpt.com"},
 }
-SPECIAL_ORDER = ["qwen", "grok"]
+SPECIAL_ORDER = ["qwen", "chatgpt", "grok"]
 _pw = None
 _CTXS = {}
 _PAGES = {}
 _AGENT_LOCK = asyncio.Lock()
 AGENT_TARGET = "qwen"
+AGENT_PROXY = ""   # при желании: "http://user:pass@host:port" (residential, иначе Cloudflare снова забанит)
 
 def _has_playwright():
     try:
@@ -1259,7 +1261,22 @@ async def agent_ensure(target=None):
     if _pw is None:
         _pw = await async_playwright().start()
     cfg = AGENT_TARGETS[target]
-    ctx = await _pw.chromium.launch_persistent_context(str(Path(__file__).parent / cfg["profile"]), headless=True, viewport={"width": 1280, "height": 900}, locale="ru-RU")
+    opts = {
+        "headless": True,
+        "viewport": {"width": 1280, "height": 900},
+        "locale": "ru-RU",
+        "timezone_id": "Europe/Moscow",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "args": ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"],
+        "ignore_default_args": ["--enable-automation"],
+    }
+    if AGENT_PROXY:
+        opts["proxy"] = {"server": AGENT_PROXY}
+    ctx = await _pw.chromium.launch_persistent_context(str(Path(__file__).parent / cfg["profile"]), **opts)
+    try:
+        await ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+    except Exception:
+        pass
     _CTXS[target] = ctx
     _PAGES[target] = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
@@ -1325,21 +1342,40 @@ async def agent_task(prompt, target=None):
                     await b.click(); await page.wait_for_timeout(1500); break
         except Exception:
             pass
-        idx, key = pick_key(active_key_index)
-        if not key:
-            return {"ok": False, "error": "no groq keys"}
         msgs = [{"role": "system", "content": agent_sys(AGENT_TARGETS[target]["site"])},
                 {"role": "user", "content": f"Задача: отправь в чат следующий текст и верни полный ответ модели:\n{prompt}"}]
         for _ in range(14):
             els, tail, _ = await agent_observe(target)
             msgs.append({"role": "user", "content": "Состояние страницы:\n" +
                          json.dumps({"url": page.url, "elements": els, "page_tail": tail}, ensure_ascii=False)})
-            try:
-                r = requests.post(GROQ_URL, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                                  json={"model": "openai/gpt-oss-120b", "messages": msgs, "max_completion_tokens": 1024}, timeout=60)
-                content = r.json()["choices"][0]["message"]["content"]
-            except Exception as ex:
-                return {"ok": False, "error": f"groq error: {ex}"}
+            content = None
+            for _try in range(max(1, len(api_keys))):
+                idx, key = pick_key(active_key_index)
+                if not key:
+                    break
+                try:
+                    r = requests.post(GROQ_URL, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                      json={"model": "openai/gpt-oss-120b", "messages": msgs, "max_completion_tokens": 1024}, timeout=60)
+                except Exception as ex:
+                    return {"ok": False, "error": f"groq network: {str(ex)[:120]}"}
+                if r.status_code == 200:
+                    try:
+                        content = r.json()["choices"][0]["message"]["content"]
+                    except Exception:
+                        return {"ok": False, "error": f"groq bad json: {r.text[:150]}"}
+                    break
+                if r.status_code == 429:
+                    try: retry = int(r.headers.get("retry-after", 60) or 60)
+                    except Exception: retry = 60
+                    api_keys[idx]["status"] = "limited"
+                    api_keys[idx]["limited_until"] = _now() + retry
+                    continue
+                if r.status_code == 401:
+                    api_keys[idx]["status"] = "invalid"
+                    continue
+                return {"ok": False, "error": f"groq {r.status_code}: {r.text[:150]}"}
+            if content is None:
+                return {"ok": False, "error": "groq: нет доступных ключей (все в лимите или невалидны)"}
             msgs.append({"role": "assistant", "content": content})
             action = agent_parse_json(content)
             if not action:
@@ -1389,17 +1425,17 @@ def special_instruction_fix(code, prompt):
     )
 
 async def special_generate(instruction):
-    last = None
+    errs = []
     for target in SPECIAL_ORDER:
         try:
             res = await agent_task(instruction, target)
         except Exception as e:
-            last = {"ok": False, "error": str(e)[:200]}
+            errs.append(f"{target}: {str(e)[:120]}")
             continue
         if res.get("ok"):
             return res, target
-        last = res
-    return (last or {"ok": False, "error": "все спец-боты недоступны"}), None
+        errs.append(f"{target}: {res.get('error', 'ошибка')[:120]}")
+    return {"ok": False, "error": " | ".join(errs) or "все спец-боты недоступны"}, None
 
 async def handle_ai_creation_special(update, context, text, st):
     wait = await update.message.reply_text("🧠 Спец-бот (Qwen→Grok через браузер) создаёт скрипт... это может занять несколько минут.")
@@ -1543,6 +1579,23 @@ async def dev_qclick(update, context):
     except Exception as e:
         await update.message.reply_text(f"❌ {str(e)[:200]}")
 
+async def dev_qclicktext(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    parts = update.message.text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        return await update.message.reply_text("Использование: `/qclicktext текст элемента`", parse_mode='Markdown')
+    try:
+        await agent_ensure()
+        page = _PAGES[AGENT_TARGET]
+        loc = page.get_by_text(parts[1], exact=False).first
+        await loc.scroll_into_view_if_needed()
+        await loc.click(timeout=15000)
+        await page.wait_for_timeout(1200)
+        await update.message.reply_text(f"✅ Кликнул по тексту «{parts[1]}». /qshot для проверки.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {str(e)[:200]}")
+
 async def dev_qtype(update, context):
     if not is_dev(update.effective_user.id):
         return await update.message.reply_text("⛳ Команда доступна только разработчику.")
@@ -1616,6 +1669,7 @@ def main():
     application.add_handler(CommandHandler("qtarget", dev_qtarget))
     application.add_handler(CommandHandler("qshot", dev_qshot))
     application.add_handler(CommandHandler("qclick", dev_qclick))
+    application.add_handler(CommandHandler("qclicktext", dev_qclicktext))
     application.add_handler(CommandHandler("qtype", dev_qtype))
     application.add_handler(CommandHandler("qenter", dev_qenter))
     application.add_handler(CommandHandler("qurl", dev_qurl))
