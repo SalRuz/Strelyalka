@@ -824,7 +824,7 @@ async def handle_ai_creation(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     if st['stage'] == 'prompt':
         wait = await update.message.reply_text("🤖 Создаю скрипт... Обычно это занимает до минуты. Не прерывайте.")
-        sys_prompt = AI_SCRIPT_SYSTEM.format(command=st['name'], prompt=text)
+        sys_prompt = AI_SCRIPT_SYSTEM.format(command=st['name'], prompt=text) + skills_prompt()
         msgs = [
             {"role": "system", "content": sys_prompt},
             {"role": "user", "content": "Сгенерируй скрипт сейчас. Верни ТОЛЬКО блок в указанном формате, без пояснений."}
@@ -892,7 +892,7 @@ async def handle_ai_edit(update: Update, context: ContextTypes.DEFAULT_TYPE, tex
     if not sinfo:
         del ai_edit[uid]
         return await update.message.reply_text(f"❌ Скрипт `{st['command']}` не найден.", parse_mode='Markdown')
-    sys_prompt = AI_FIX_SYSTEM.format(code=sinfo['code'], prev_comment=sinfo.get('ai_comment') or 'нет', prompt=text)
+    sys_prompt = AI_FIX_SYSTEM.format(code=sinfo['code'], prev_comment=sinfo.get('ai_comment') or 'нет', prompt=text) + skills_prompt()
     msgs = [
         {"role": "system", "content": sys_prompt},
         {"role": "user", "content": "Верни исправленный скрипт сейчас. Только блок в указанном формате."}
@@ -1122,6 +1122,11 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message is None: return
     uid = update.effective_user.id
     text = update.message.text or ""
+    if uid in skill_wait:
+        name = skill_wait.pop(uid)
+        bot_state.setdefault('ai_skills', {})[name] = text[:8000]
+        save_data()
+        return await update.message.reply_text(f"✅ Скилл `{name}` добавлен. Применяется при создании и починке скриптов во всех чатах.", parse_mode='Markdown')
     # 1) Создание/починка мини-бота через ИИ (приоритет над ручной загрузкой)
     if uid in ai_edit:
         await handle_ai_edit(update, context, text)
@@ -1204,7 +1209,7 @@ Q_SYS = (
     "Отвечай ОДНИМ JSON-объектом действия без пояснений:\n"
     '{"action":"click","index":N} | {"action":"type","index":N,"text":"..."} | '
     '{"action":"press","key":"Enter"} | {"action":"wait","seconds":5} | '
-    '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ модели"}\n"
+    '{"action":"scroll","dir":"down"} | {"action":"finish","answer":"полный ответ модели"}\n'
     "Тактика: найди поле ввода чата (textarea/contenteditable) -> type текста -> press Enter -> "
     "wait 5-10 сек -> читай page_tail: если ответ ещё генерируется (видна кнопка Stop) — wait ещё; "
     "когда готов — finish с ПОЛНЫМ текстом ответа из page_tail."
@@ -1408,6 +1413,58 @@ async def dev_qcurl(update, context):
     except Exception as e:
         await update.message.reply_text(f"❌ {str(e)[:250]}")
 
+# ==================== СКИЛЛЫ ИИ (управляет разработчик командами) ====================
+skill_wait = {}
+
+def skills_prompt():
+    sk = bot_state.get('ai_skills') or {}
+    if not sk:
+        return ""
+    out = "\n\nДОПОЛНИТЕЛЬНЫЕ СКИЛЛЫ (обязательно учитывай при генерации и починке):"
+    for n, t in sk.items():
+        out += f"\n### Скилл {n}:\n{t}"
+    return out
+
+async def dev_addskill(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not context.args:
+        return await update.message.reply_text("Использование: `/addskill имя` — затем следующим сообщением отправь текст скилла.", parse_mode='Markdown')
+    skill_wait[update.effective_user.id] = context.args[0].lower()
+    await update.message.reply_text(f"📥 Следующим сообщением отправь текст скилла `{context.args[0].lower()}` (правила/знания/шаблоны для ИИ).")
+
+async def dev_listskills(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    sk = bot_state.get('ai_skills') or {}
+    if not sk:
+        return await update.message.reply_text("📭 Скиллов нет.")
+    lines = [f"• `{n}` — {len(t)} симв." for n, t in sk.items()]
+    await update.message.reply_text("🧩 Скиллы ИИ:\n" + "\n".join(lines), parse_mode='Markdown')
+
+async def dev_viewskill(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not context.args:
+        return await update.message.reply_text("Использование: `/viewskill имя`", parse_mode='Markdown')
+    sk = bot_state.get('ai_skills') or {}
+    t = sk.get(context.args[0].lower())
+    if not t:
+        return await update.message.reply_text("❌ Нет такого скилла.")
+    await update.message.reply_text(f"🧩 `{context.args[0].lower()}`:\n{t[:3500]}", parse_mode='Markdown')
+
+async def dev_delskill(update, context):
+    if not is_dev(update.effective_user.id):
+        return await update.message.reply_text("⛳ Команда доступна только разработчику.")
+    if not context.args:
+        return await update.message.reply_text("Использование: `/delskill имя`", parse_mode='Markdown')
+    sk = bot_state.get('ai_skills') or {}
+    if context.args[0].lower() not in sk:
+        return await update.message.reply_text("❌ Нет такого скилла.")
+    del sk[context.args[0].lower()]
+    save_data()
+    await update.message.reply_text(f"🗑 Скилл `{context.args[0].lower()}` удалён.", parse_mode='Markdown')
+
 def main():
     if not acquire_single_instance_lock():
         print("❌ Бот УЖЕ запущен в другом процессе! Выходим, чтобы не перехватывать обновления.")
@@ -1431,6 +1488,10 @@ def main():
     application.add_handler(CommandHandler("delkey", dev_delkey))
     application.add_handler(CommandHandler("qwen", dev_qwen))
     application.add_handler(CommandHandler("qcurl", dev_qcurl))
+    application.add_handler(CommandHandler("addskill", dev_addskill))
+    application.add_handler(CommandHandler("listskills", dev_listskills))
+    application.add_handler(CommandHandler("viewskill", dev_viewskill))
+    application.add_handler(CommandHandler("delskill", dev_delskill))
     application.add_handler(CommandHandler("addscript", add_script))
     application.add_handler(CommandHandler("listscripts", list_scripts))
     application.add_handler(CommandHandler("viewscript", view_script))
